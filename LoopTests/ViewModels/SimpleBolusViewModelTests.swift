@@ -105,10 +105,10 @@ class SimpleBolusViewModelTests: XCTestCase {
         // This triggers a recommendation update
         viewModel.enteredCarbString = "20"
         
-        XCTAssertEqual("2.5", viewModel.recommendedBolus)
-        XCTAssertEqual("2.5", viewModel.enteredBolusString)
+        XCTAssertEqual("2,5", viewModel.recommendedBolus)
+        XCTAssertEqual("2,5", viewModel.enteredBolusString)
         
-        viewModel.enteredBolusString = "0.1"
+        viewModel.enteredBolusString = "0,1"
 
         let _ = await viewModel.saveAndDeliver()
 
@@ -131,8 +131,8 @@ class SimpleBolusViewModelTests: XCTestCase {
 
         viewModel.enteredCarbString = "20"
 
-        XCTAssertEqual("2.5", viewModel.recommendedBolus)
-        XCTAssertEqual("2.5", viewModel.enteredBolusString)
+        XCTAssertEqual("2,5", viewModel.recommendedBolus)
+        XCTAssertEqual("2,5", viewModel.enteredBolusString)
 
         viewModel.enteredCarbString = ""
 
@@ -169,7 +169,7 @@ class SimpleBolusViewModelTests: XCTestCase {
 
         viewModel.manualGlucoseString = "180"
 
-        XCTAssertEqual("2.4", viewModel.activeInsulin)
+        XCTAssertEqual("2,4", viewModel.activeInsulin)
 
         viewModel.manualGlucoseString = ""
 
@@ -183,16 +183,16 @@ class SimpleBolusViewModelTests: XCTestCase {
         viewModel.manualGlucoseString = "260"
         XCTAssertEqual(viewModel.manualGlucoseString, "260")
         self.displayGlucosePreference.unitDidChange(to: .millimolesPerLiter)
-        XCTAssertEqual(viewModel.manualGlucoseString, "14.4")
+        XCTAssertEqual(viewModel.manualGlucoseString, "14,4")
         self.displayGlucosePreference.unitDidChange(to: .milligramsPerDeciliter)
         XCTAssertEqual(viewModel.manualGlucoseString, "260")
         self.displayGlucosePreference.unitDidChange(to: .millimolesPerLiter)
-        XCTAssertEqual(viewModel.manualGlucoseString, "14.4")
+        XCTAssertEqual(viewModel.manualGlucoseString, "14,4")
 
-        viewModel.manualGlucoseString = "14.0"
-        XCTAssertEqual(viewModel.manualGlucoseString, "14.0")
-        viewModel.manualGlucoseString = "14.4"
-        XCTAssertEqual(viewModel.manualGlucoseString, "14.4")
+        viewModel.manualGlucoseString = "14,0"
+        XCTAssertEqual(viewModel.manualGlucoseString, "14,0")
+        viewModel.manualGlucoseString = "14,4"
+        XCTAssertEqual(viewModel.manualGlucoseString, "14,4")
         self.displayGlucosePreference.unitDidChange(to: .milligramsPerDeciliter)
         XCTAssertEqual(viewModel.manualGlucoseString, "259")
     }
