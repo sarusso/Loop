@@ -102,6 +102,8 @@
 		4328E02F1CFBF81800E199AA /* WKInterfaceImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4328E02E1CFBF81800E199AA /* WKInterfaceImage.swift */; };
 		4328E0331CFC091100E199AA /* WatchContext+LoopKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4328E0311CFC068900E199AA /* WatchContext+LoopKit.swift */; };
 		4328E0351CFC0AE100E199AA /* WatchDataManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4328E0341CFC0AE100E199AA /* WatchDataManager.swift */; };
+		AA00000200000000DEADBEEF /* DiaWatchManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000DEADBEEF /* DiaWatchManager.swift */; };
+		AA00000400000000DEADBEEF /* DiaWatchSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000300000000DEADBEEF /* DiaWatchSettingsView.swift */; };
 		432CF87520D8AC950066B889 /* NSUserDefaults+WatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4328E0231CFBE2C500E199AA /* NSUserDefaults+WatchApp.swift */; };
 		432E73CB1D24B3D6009AD15D /* RemoteDataServicesManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 432E73CA1D24B3D6009AD15D /* RemoteDataServicesManager.swift */; };
 		433EA4C41D9F71C800CD78FB /* CommandResponseViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 433EA4C31D9F71C800CD78FB /* CommandResponseViewController.swift */; };
@@ -838,6 +840,8 @@
 		4328E02E1CFBF81800E199AA /* WKInterfaceImage.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = WKInterfaceImage.swift; sourceTree = "<group>"; };
 		4328E0311CFC068900E199AA /* WatchContext+LoopKit.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = "WatchContext+LoopKit.swift"; sourceTree = "<group>"; };
 		4328E0341CFC0AE100E199AA /* WatchDataManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; lineEnding = 0; path = WatchDataManager.swift; sourceTree = "<group>"; xcLanguageSpecificationIdentifier = xcode.lang.swift; };
+		AA00000100000000DEADBEEF /* DiaWatchManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiaWatchManager.swift; sourceTree = "<group>"; };
+		AA00000300000000DEADBEEF /* DiaWatchSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiaWatchSettingsView.swift; sourceTree = "<group>"; };
 		432E73CA1D24B3D6009AD15D /* RemoteDataServicesManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = RemoteDataServicesManager.swift; sourceTree = "<group>"; };
 		4337615E1D52F487004A3647 /* GlucoseHUDView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = GlucoseHUDView.swift; sourceTree = "<group>"; };
 		433EA4C31D9F71C800CD78FB /* CommandResponseViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CommandResponseViewController.swift; sourceTree = "<group>"; };
@@ -1987,6 +1991,7 @@
 				438D42FA1D7D11A4003244B0 /* PredictionInputEffectTableViewCell.swift */,
 				439706E522D2E84900C81566 /* PredictionSettingTableViewCell.swift */,
 				1DE09BA824A3E23F009EE9F9 /* SettingsView.swift */,
+				AA00000300000000DEADBEEF /* DiaWatchSettingsView.swift */,
 				DDC389FB2A2BC6670066E2E8 /* SettingsView+algorithmExperimentsSection.swift */,
 				C1DE5D22251BFC4D00439E49 /* SimpleBolusView.swift */,
 				43F64DD81D9C92C900D24DC6 /* TitleSubtitleTableViewCell.swift */,
@@ -2030,6 +2035,7 @@
 				89ADE13A226BFA0F0067222B /* TestingScenariosManager.swift */,
 				1D82E69F25377C6B009131FB /* TrustedTimeChecker.swift */,
 				4328E0341CFC0AE100E199AA /* WatchDataManager.swift */,
+				AA00000100000000DEADBEEF /* DiaWatchManager.swift */,
 				1DA6499D2441266400F61E75 /* Alerts */,
 				E95D37FF24EADE68005E2F50 /* Store Protocols */,
 				E9B355232935906B0076AB04 /* Missed Meal Detection */,
@@ -3485,6 +3491,7 @@
 				4F6663941E905FD2009E74FC /* ChartColorPalette+Loop.swift in Sources */,
 				A9F703732489BC8500C98AD8 /* CarbStore+SimulatedCoreData.swift in Sources */,
 				4328E0351CFC0AE100E199AA /* WatchDataManager.swift in Sources */,
+				AA00000200000000DEADBEEF /* DiaWatchManager.swift in Sources */,
 				4345E3FC21F04911009E00E5 /* UIColor+HIG.swift in Sources */,
 				1D4A3E2E2478628500FD601B /* StoredAlert+CoreDataProperties.swift in Sources */,
 				E95D380124EADE7C005E2F50 /* DoseStoreProtocol.swift in Sources */,
@@ -3517,6 +3524,7 @@
 				435400341C9F878D00D5819C /* SetBolusUserInfo.swift in Sources */,
 				A9DCF32A25B0FABF00C89088 /* LoopUIColorPalette+Default.swift in Sources */,
 				1DDE273E24AEA4B000796622 /* SettingsView.swift in Sources */,
+				AA00000400000000DEADBEEF /* DiaWatchSettingsView.swift in Sources */,
 				A9B607B0247F000F00792BE4 /* UserNotifications+Loop.swift in Sources */,
 				43F89CA322BDFBBD006BB54E /* UIActivityIndicatorView.swift in Sources */,
 				A999D40624663D18004C89D4 /* PumpManagerError.swift in Sources */,

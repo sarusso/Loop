@@ -60,7 +60,7 @@ public struct SettingsView: View {
     
     var localizedAppNameAndVersion: String
 
-    public init(viewModel: SettingsViewModel, diaWatchManager: DiaWatchManager, localizedAppNameAndVersion: String) {
+    init(viewModel: SettingsViewModel, diaWatchManager: DiaWatchManager, localizedAppNameAndVersion: String) {
         self.viewModel = viewModel
         self.versionUpdateViewModel = viewModel.versionUpdateViewModel
         self.diaWatchManager = diaWatchManager
