@@ -17,11 +17,18 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
     // MARK: - Published state (drives settings UI)
 
+    struct DiscoveredDevice: Identifiable {
+        let peripheral: CBPeripheral
+        let rssi: Int          // dBm, e.g. -55
+        var id: UUID { peripheral.identifier }
+        var name: String { peripheral.name ?? "Unknown" }
+    }
+
     @Published var pairedDeviceName: String?
     @Published var lastPushDate: Date?
     @Published var lastPushError: String?
     @Published var isScanning: Bool = false
-    @Published var discoveredDevices: [CBPeripheral] = []
+    @Published var discoveredDevices: [DiscoveredDevice] = []
 
     // MARK: - Private state
 
@@ -74,8 +81,17 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let mgdl = Int(sample.quantity.doubleValue(for: .milligramsPerDeciliter))
         let trend = diaWatchTrend(from: dm.glucoseDisplay(for: sample)?.trendType)
         let ts = Int(sample.startDate.timeIntervalSince1970)
-        let message = "GB({\"face\": \"diawatch\", \"t\": \"reading\", \"v\": \(mgdl), \"trend\": \"\(trend)\", \"ts\": \(ts)})\r\n"
+        send(mgdl: mgdl, trend: trend, ts: ts)
+    }
 
+    func pushTest() {
+        send(mgdl: 190, trend: " -", ts: Int(Date().timeIntervalSince1970))
+    }
+
+    private func send(mgdl: Int, trend: String, ts: Int) {
+        guard !isSending, UserDefaults.standard.diaWatchPeripheralID != nil else { return }
+
+        let message = "GB({\"face\": \"diawatch\", \"t\": \"reading\", \"v\": \(mgdl), \"trend\": \"\(trend)\", \"ts\": \(ts)})\r\n"
         guard let data = message.data(using: .utf8) else { return }
 
         pendingChunks = stride(from: 0, to: data.count, by: 20).map {
@@ -121,12 +137,12 @@ final class DiaWatchManager: NSObject, ObservableObject {
         scanTimer = nil
     }
 
-    func pair(_ p: CBPeripheral) {
+    func pair(_ device: DiscoveredDevice) {
         stopScan()
-        UserDefaults.standard.diaWatchPeripheralID = p.identifier
-        UserDefaults.standard.diaWatchDeviceName = p.name
-        pairedDeviceName = p.name
-        log.default("Paired DiaWatch device: %{public}@ (%{public}@)", p.name ?? "unknown", p.identifier.uuidString)
+        UserDefaults.standard.diaWatchPeripheralID = device.peripheral.identifier
+        UserDefaults.standard.diaWatchDeviceName = device.peripheral.name
+        pairedDeviceName = device.peripheral.name
+        log.default("Paired DiaWatch device: %{public}@ (%{public}@)", device.name, device.peripheral.identifier.uuidString)
     }
 
     func forget() {
@@ -219,9 +235,9 @@ extension DiaWatchManager: CBCentralManagerDelegate {
             self.peripheral = peripheral
             peripheral.delegate = self
             central.connect(peripheral, options: nil)
-        } else if isScanning && !discoveredDevices.contains(where: { $0.identifier == peripheral.identifier }) {
+        } else if isScanning && !discoveredDevices.contains(where: { $0.id == peripheral.identifier }) {
             // UI pairing scan — show every device, no name filter
-            discoveredDevices.append(peripheral)
+            discoveredDevices.append(DiscoveredDevice(peripheral: peripheral, rssi: RSSI.intValue))
         }
     }
 

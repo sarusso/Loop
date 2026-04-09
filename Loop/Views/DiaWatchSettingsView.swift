@@ -79,6 +79,19 @@ struct DiaWatchSettingsView: View {
             if manager.lastPushDate == nil && manager.lastPushError == nil {
                 Text("No readings sent yet").foregroundColor(.secondary)
             }
+            Button("Send test reading (190 mg/dL)") {
+                manager.pushTest()
+            }
+            .disabled(manager.pairedDeviceName == nil)
+        }
+    }
+
+    /// Green > -60, yellow -60…-80, red < -80
+    private func rssiColor(_ rssi: Int) -> Color {
+        switch rssi {
+        case (-60)...: return .green
+        case (-80)...: return .yellow
+        default:       return .red
         }
     }
 
@@ -89,11 +102,14 @@ struct DiaWatchSettingsView: View {
                 Text("Scanning for nearby BLE devices…")
                     .foregroundColor(.secondary)
             } else {
-                ForEach(manager.discoveredDevices, id: \.identifier) { device in
+                ForEach(manager.discoveredDevices) { device in
                     Button(action: { manager.pair(device) }) {
                         HStack {
-                            Text(device.name ?? "Unknown Device").foregroundColor(.primary)
+                            Text(device.name).foregroundColor(.primary)
                             Spacer()
+                            Text("\(device.rssi) dBm")
+                                .font(.caption)
+                                .foregroundColor(rssiColor(device.rssi))
                             Text("Pair").foregroundColor(.accentColor)
                         }
                     }
