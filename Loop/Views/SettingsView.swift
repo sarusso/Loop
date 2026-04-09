@@ -23,6 +23,7 @@ public struct SettingsView: View {
 
     @ObservedObject var viewModel: SettingsViewModel
     @ObservedObject var versionUpdateViewModel: VersionUpdateViewModel
+    @ObservedObject var diaWatchManager: DiaWatchManager
 
     enum Destination {
         enum Alert: String, Identifiable {
@@ -59,9 +60,10 @@ public struct SettingsView: View {
     
     var localizedAppNameAndVersion: String
 
-    public init(viewModel: SettingsViewModel, localizedAppNameAndVersion: String) {
+    public init(viewModel: SettingsViewModel, diaWatchManager: DiaWatchManager, localizedAppNameAndVersion: String) {
         self.viewModel = viewModel
         self.versionUpdateViewModel = viewModel.versionUpdateViewModel
+        self.diaWatchManager = diaWatchManager
         self.localizedAppNameAndVersion = localizedAppNameAndVersion
     }
     
@@ -81,6 +83,7 @@ public struct SettingsView: View {
                         configurationSection
                     }
                     deviceSettingsSection
+                    diaWatchSection
                     if FeatureFlags.allowExperimentalFeatures {
                         favoriteFoodsSection
                     }
@@ -367,6 +370,27 @@ extension SettingsView {
         }
     }
     
+    private var diaWatchSection: some View {
+        Section {
+            NavigationLink(destination: DiaWatchSettingsView(manager: diaWatchManager)) {
+                HStack {
+                    Image(systemName: "applewatch")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 30, height: 30)
+                        .foregroundColor(.accentColor)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("DiaWatch")
+                        Text(diaWatchManager.pairedDeviceName ?? "Not paired")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+        }
+    }
+
     private var favoriteFoodsSection: some View {
         Section {
             LargeButton(action: { sheet = .favoriteFoods },
@@ -620,14 +644,15 @@ public struct SettingsView_Previews: PreviewProvider {
     public static var previews: some View {
         let displayGlucosePreference = DisplayGlucosePreference(displayGlucoseUnit: .milligramsPerDeciliter)
         let viewModel = SettingsViewModel.preview
+        let diaWatch = DiaWatchManager.preview
         return Group {
-            SettingsView(viewModel: viewModel, localizedAppNameAndVersion: "Loop Demo V1")
+            SettingsView(viewModel: viewModel, diaWatchManager: diaWatch, localizedAppNameAndVersion: "Loop Demo V1")
                 .colorScheme(.light)
                 .previewDevice(PreviewDevice(rawValue: "iPhone SE 2"))
                 .previewDisplayName("SE light")
                 .environmentObject(displayGlucosePreference)
-            
-            SettingsView(viewModel: viewModel, localizedAppNameAndVersion: "Loop Demo V1")
+
+            SettingsView(viewModel: viewModel, diaWatchManager: diaWatch, localizedAppNameAndVersion: "Loop Demo V1")
                 .colorScheme(.dark)
                 .previewDevice(PreviewDevice(rawValue: "iPhone 11 Pro Max"))
                 .previewDisplayName("11 Pro dark")

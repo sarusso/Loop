@@ -17,6 +17,8 @@ extension UserDefaults {
         case loopNotRunningNotifications = "com.loopkit.Loop.loopNotRunningNotifications"
         case inFlightAutomaticDose = "com.loopkit.Loop.inFlightAutomaticDose"
         case favoriteFoods = "com.loopkit.Loop.favoriteFoods"
+        case diaWatchPeripheralID = "com.loopkit.Loop.DiaWatch.peripheralID"
+        case diaWatchDeviceName = "com.loopkit.Loop.DiaWatch.deviceName"
     }
 
     var legacyPumpManagerRawValue: PumpManager.RawValue? {
@@ -91,6 +93,19 @@ extension UserDefaults {
         }
     }
     
+    var diaWatchPeripheralID: UUID? {
+        get {
+            guard let str = string(forKey: Key.diaWatchPeripheralID.rawValue) else { return nil }
+            return UUID(uuidString: str)
+        }
+        set { set(newValue?.uuidString, forKey: Key.diaWatchPeripheralID.rawValue) }
+    }
+
+    var diaWatchDeviceName: String? {
+        get { string(forKey: Key.diaWatchDeviceName.rawValue) }
+        set { set(newValue, forKey: Key.diaWatchDeviceName.rawValue) }
+    }
+
     var favoriteFoods: [StoredFavoriteFood] {
         get {
             let decoder = JSONDecoder()

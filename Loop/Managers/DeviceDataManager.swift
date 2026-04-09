@@ -231,6 +231,10 @@ final class DeviceDataManager {
 
     private var watchManager: WatchDataManager!
 
+    // MARK: - DiaWatch
+
+    private(set) var diaWatchManager: DiaWatchManager!
+
     // MARK: - Status Extension
 
     private var statusExtensionManager: ExtensionDataManager!
@@ -404,6 +408,7 @@ final class DeviceDataManager {
         loopManager.presetActivationObservers.append(analyticsServicesManager)
 
         watchManager = WatchDataManager(deviceManager: self, healthStore: healthStore)
+        diaWatchManager = DiaWatchManager(deviceManager: self)
 
         let remoteDataServicesManager = RemoteDataServicesManager(
             alertStore: alertManager.alertStore,
