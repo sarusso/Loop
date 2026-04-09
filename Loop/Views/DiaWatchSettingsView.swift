@@ -86,7 +86,7 @@ struct DiaWatchSettingsView: View {
     private var discoveredDevicesSection: some View {
         Section(header: Text("Found Devices")) {
             if manager.discoveredDevices.isEmpty {
-                Text("Looking for PineTime / DiaWatch devices…")
+                Text("Scanning for nearby BLE devices…")
                     .foregroundColor(.secondary)
             } else {
                 ForEach(manager.discoveredDevices, id: \.identifier) { device in

@@ -107,7 +107,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
         guard central.state == .poweredOn, !isScanning else { return }
         discoveredDevices = []
         isScanning = true
-        central.scanForPeripherals(withServices: [Self.nusServiceUUID], options: nil)
+        // nil = show all nearby BLE devices so the user can identify their watch
+        central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
         scanTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: false) { [weak self] _ in
             self?.stopScan()
         }
@@ -212,18 +213,14 @@ extension DiaWatchManager: CBCentralManagerDelegate {
         advertisementData: [String: Any],
         rssi RSSI: NSNumber
     ) {
-        let name = peripheral.name ?? ""
-        guard name.localizedCaseInsensitiveContains("pinetime") ||
-              name.localizedCaseInsensitiveContains("diawatch")
-        else { return }
-
         if isSending && peripheral.identifier == UserDefaults.standard.diaWatchPeripheralID {
             // Found our target while fallback-scanning for a push
             central.stopScan()
             self.peripheral = peripheral
             peripheral.delegate = self
             central.connect(peripheral, options: nil)
-        } else if !discoveredDevices.contains(where: { $0.identifier == peripheral.identifier }) {
+        } else if isScanning && !discoveredDevices.contains(where: { $0.identifier == peripheral.identifier }) {
+            // UI pairing scan — show every device, no name filter
             discoveredDevices.append(peripheral)
         }
     }
