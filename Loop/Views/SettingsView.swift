@@ -373,7 +373,7 @@ extension SettingsView {
     private var diaWatchSection: some View {
         Section {
             NavigationLink(destination: DiaWatchSettingsView(manager: diaWatchManager)) {
-                HStack {
+                HStack(spacing: 12) {
                     Image(systemName: "applewatch")
                         .resizable()
                         .scaledToFit()
@@ -384,11 +384,56 @@ extension SettingsView {
                         Text(diaWatchManager.pairedDeviceName ?? "Not paired")
                             .font(.caption)
                             .foregroundColor(.secondary)
+                        if let date = diaWatchManager.lastPushDate, diaWatchManager.pairedDeviceName != nil {
+                            let timeStr = diaWatchLastPushSummary(date: date)
+                            Text(timeStr)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
                     }
+                    Spacer()
+                    diaWatchStatusIndicator
                 }
-                .padding(.vertical, 8)
+                .padding(.vertical, 4)
             }
         }
+    }
+
+    @ViewBuilder
+    private var diaWatchStatusIndicator: some View {
+        switch diaWatchManager.pushPhase {
+        case .idle:
+            if diaWatchManager.pairedDeviceName != nil {
+                Circle()
+                    .fill(lastPushStatusColor)
+                    .frame(width: 10, height: 10)
+            }
+        case .connecting, .sending:
+            ProgressView().scaleEffect(0.7)
+        case .success:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundColor(.green)
+                .font(.caption)
+        }
+    }
+
+    private var lastPushStatusColor: Color {
+        guard let date = diaWatchManager.lastPushDate else { return .gray }
+        let age = Date().timeIntervalSince(date)
+        if age < 360 { return .green }     // under 6 min — fresh reading
+        if age < 900 { return .yellow }    // 6–15 min — slightly stale
+        return .red                        // > 15 min — stale
+    }
+
+    private static let settingsTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .none
+        f.timeStyle = .short
+        return f
+    }()
+
+    private func diaWatchLastPushSummary(date: Date) -> String {
+        "Synced at \(Self.settingsTimeFormatter.string(from: date))"
     }
 
     private var favoriteFoodsSection: some View {

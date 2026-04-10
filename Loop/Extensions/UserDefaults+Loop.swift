@@ -19,6 +19,9 @@ extension UserDefaults {
         case favoriteFoods = "com.loopkit.Loop.favoriteFoods"
         case diaWatchPeripheralID = "com.loopkit.Loop.DiaWatch.peripheralID"
         case diaWatchDeviceName = "com.loopkit.Loop.DiaWatch.deviceName"
+        case diaWatchHapticSlots = "com.loopkit.Loop.DiaWatch.hapticSlots"
+        case diaWatchHapOnReading = "com.loopkit.Loop.DiaWatch.hapOnReading"
+        case diaWatchWakeOnReading = "com.loopkit.Loop.DiaWatch.wakeOnReading"
     }
 
     var legacyPumpManagerRawValue: PumpManager.RawValue? {
@@ -104,6 +107,29 @@ extension UserDefaults {
     var diaWatchDeviceName: String? {
         get { string(forKey: Key.diaWatchDeviceName.rawValue) }
         set { set(newValue, forKey: Key.diaWatchDeviceName.rawValue) }
+    }
+
+    var diaWatchHapticSlots: [DiaWatchManager.HapticSlot] {
+        get {
+            guard let data = data(forKey: Key.diaWatchHapticSlots.rawValue),
+                  let slots = try? JSONDecoder().decode([DiaWatchManager.HapticSlot].self, from: data)
+            else { return DiaWatchManager.HapticSlot.defaults }
+            return slots
+        }
+        set {
+            let data = try? JSONEncoder().encode(newValue)
+            set(data, forKey: Key.diaWatchHapticSlots.rawValue)
+        }
+    }
+
+    var diaWatchHapOnReading: Bool {
+        get { bool(forKey: Key.diaWatchHapOnReading.rawValue) }
+        set { set(newValue, forKey: Key.diaWatchHapOnReading.rawValue) }
+    }
+
+    var diaWatchWakeOnReading: Bool {
+        get { bool(forKey: Key.diaWatchWakeOnReading.rawValue) }
+        set { set(newValue, forKey: Key.diaWatchWakeOnReading.rawValue) }
     }
 
     var favoriteFoods: [StoredFavoriteFood] {

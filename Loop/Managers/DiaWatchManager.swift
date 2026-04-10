@@ -16,6 +16,26 @@ final class DiaWatchManager: NSObject, ObservableObject {
     static let nusRXCharUUID  = CBUUID(string: "6e400002-b5a3-f393-e0a9-e50e24dcca9e")
     static let nusTXCharUUID  = CBUUID(string: "6e400003-b5a3-f393-e0a9-e50e24dcca9e")
 
+    // MARK: - Haptic slot model
+
+    struct HapticSlot: Codable, Equatable {
+        var enabled: Bool
+        var op: String      // ">" or "<"
+        var thr: Int        // glucose threshold in mg/dL
+        var pat: String     // pattern name
+
+        static let allPatterns: [String] = [
+            "simple_pulse", "single_buzz", "double_tap", "short_long", "long_short",
+            "triple_tap", "notification", "notification_single", "heartbeat",
+            "bounce", "rbounce", "countdown", "stutter",
+            "urgent", "sos", "fanfare", "linear_ramp", "uprising_sweep"
+        ]
+
+        static let defaults: [HapticSlot] = (0..<5).map { _ in
+            HapticSlot(enabled: false, op: ">", thr: 180, pat: "single_buzz")
+        }
+    }
+
     // MARK: - Published state (drives settings UI)
 
     struct DiscoveredDevice: Identifiable {
@@ -25,11 +45,23 @@ final class DiaWatchManager: NSObject, ObservableObject {
         var name: String { peripheral.name ?? "Unknown" }
     }
 
+    enum PushPhase: Equatable {
+        case idle
+        case connecting
+        case sending
+        case success
+    }
+
     @Published var pairedDeviceName: String?
     @Published var lastPushDate: Date?
+    @Published var lastPushValue: Int?
     @Published var lastPushError: String?
     @Published var isScanning: Bool = false
     @Published var discoveredDevices: [DiscoveredDevice] = []
+    @Published var pushPhase: PushPhase = .idle
+    @Published var hapticSlots: [HapticSlot] = UserDefaults.standard.diaWatchHapticSlots
+    @Published var hapOnReading: Bool = UserDefaults.standard.diaWatchHapOnReading
+    @Published var wakeOnReading: Bool = UserDefaults.standard.diaWatchWakeOnReading
 
     // MARK: - Private state
 
@@ -38,6 +70,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
     private var rxCharacteristic: CBCharacteristic?
     private var pendingChunks: [Data] = []
     private var isSending = false
+    private var lastSentMgdl: Int = 0
+    private var onTransmissionComplete: (() -> Void)?
     private var scanTimer: Timer?
     private var sendTimeoutTimer: Timer?
     private static let sendTimeout: TimeInterval = 15
@@ -75,7 +109,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         push()
     }
 
-    // MARK: - Push
+    // MARK: - Push (glucose reading)
 
     func push() {
         guard !isSending, UserDefaults.standard.diaWatchPeripheralID != nil else { return }
@@ -84,17 +118,68 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let mgdl = Int(sample.quantity.doubleValue(for: .milligramsPerDeciliter))
         let trend = diaWatchTrend(from: dm.glucoseDisplay(for: sample)?.trendType)
         let ts = Int(sample.startDate.timeIntervalSince1970)
-        send(mgdl: mgdl, trend: trend, ts: ts)
+        sendReading(mgdl: mgdl, trend: trend, ts: ts)
     }
 
-    func pushTest() {
-        send(mgdl: 190, trend: " -", ts: Int(Date().timeIntervalSince1970))
+    func pushTest(mgdl: Int = 190) {
+        sendReading(mgdl: mgdl, trend: " -", ts: Int(Date().timeIntervalSince1970))
     }
 
-    private func send(mgdl: Int, trend: String, ts: Int) {
+    private func sendReading(mgdl: Int, trend: String, ts: Int) {
+        let message = "GB({\"face\":\"diawatch\",\"t\":\"reading\",\"v\":\(mgdl),\"trend\":\"\(trend)\",\"ts\":\(ts)})\r\n"
+        lastSentMgdl = mgdl
+        log.default("Sending DiaWatch reading: %{public}@", message)
+        beginTransmission(message) { [weak self] in
+            guard let self else { return }
+            self.lastPushDate = Date()
+            self.lastPushValue = self.lastSentMgdl
+            self.lastPushError = nil
+            self.log.default("DiaWatch push complete")
+        }
+    }
+
+    // MARK: - Haptic slot configuration
+
+    func applyHapticSlots() {
         guard !isSending, UserDefaults.standard.diaWatchPeripheralID != nil else { return }
 
-        let message = "GB({\"face\": \"diawatch\", \"t\": \"reading\", \"v\": \(mgdl), \"trend\": \"\(trend)\", \"ts\": \(ts)})\r\n"
+        // Persist before sending
+        UserDefaults.standard.diaWatchHapticSlots = hapticSlots
+
+        // Build one concatenated transmission (watch parses line by line)
+        let lines = hapticSlots.enumerated().map { idx, slot -> String in
+            if slot.enabled {
+                return "GB({\"face\":\"diawatch\",\"t\":\"s_h\",\"idx\":\(idx),\"op\":\"\(slot.op)\",\"thr\":\(slot.thr),\"pat\":\"\(slot.pat)\"})\r\n"
+            } else {
+                return "GB({\"face\":\"diawatch\",\"t\":\"d_h\",\"idx\":\(idx)})\r\n"
+            }
+        }
+        let message = lines.joined()
+        log.default("Sending DiaWatch haptic config: %{public}@", message)
+        beginTransmission(message) { [weak self] in
+            self?.log.default("DiaWatch haptic config applied")
+        }
+    }
+
+    // MARK: - Watch config
+
+    func sendConfig() {
+        guard !isSending, UserDefaults.standard.diaWatchPeripheralID != nil else { return }
+
+        UserDefaults.standard.diaWatchHapOnReading = hapOnReading
+        UserDefaults.standard.diaWatchWakeOnReading = wakeOnReading
+
+        let message = "GB({\"face\":\"diawatch\",\"t\":\"s_c\",\"hap\":\(hapOnReading ? 1 : 0),\"wake\":\(wakeOnReading ? 1 : 0)})\r\n"
+        log.default("Sending DiaWatch config: %{public}@", message)
+        beginTransmission(message) { [weak self] in
+            self?.log.default("DiaWatch config applied")
+        }
+    }
+
+    // MARK: - Base transmission
+
+    private func beginTransmission(_ message: String, onComplete: (() -> Void)? = nil) {
+        guard !isSending, UserDefaults.standard.diaWatchPeripheralID != nil else { return }
         guard let data = message.data(using: .utf8) else { return }
 
         pendingChunks = stride(from: 0, to: data.count, by: 20).map {
@@ -102,7 +187,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
         }
 
         isSending = true
-        log.default("Sending DiaWatch reading: %{public}@", message)
+        onTransmissionComplete = onComplete
+        pushPhase = .connecting
         startSendTimeout()
         connectOrScan()
     }
@@ -128,7 +214,9 @@ final class DiaWatchManager: NSObject, ObservableObject {
         pendingChunks = []
         peripheral = nil
         rxCharacteristic = nil
+        onTransmissionComplete = nil
         lastPushError = error
+        pushPhase = .idle
     }
 
     private func connectOrScan() {
@@ -179,10 +267,12 @@ final class DiaWatchManager: NSObject, ObservableObject {
         rxCharacteristic = nil
         isSending = false
         pendingChunks = []
+        onTransmissionComplete = nil
         UserDefaults.standard.diaWatchPeripheralID = nil
         UserDefaults.standard.diaWatchDeviceName = nil
         pairedDeviceName = nil
         lastPushDate = nil
+        lastPushValue = nil
         lastPushError = nil
         log.default("Forgot DiaWatch device")
     }
@@ -195,12 +285,15 @@ final class DiaWatchManager: NSObject, ObservableObject {
         guard !pendingChunks.isEmpty else {
             // All chunks sent — cancel timeout, wait 2 s then disconnect cleanly
             cancelSendTimeout()
+            pushPhase = .success
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 guard let self, let p = self.peripheral else { return }
                 self.central.cancelPeripheralConnection(p)
             }
             return
         }
+
+        if pushPhase != .sending { pushPhase = .sending }
 
         guard p.canSendWriteWithoutResponse else {
             // Flow-control: peripheralIsReady(toSendWriteWithoutResponse:) will resume us
@@ -290,11 +383,16 @@ extension DiaWatchManager: CBCentralManagerDelegate {
         if wasStillSending {
             let msg = error?.localizedDescription ?? "Disconnected mid-send"
             log.error("DiaWatch disconnected mid-send: %{public}@", msg)
+            onTransmissionComplete = nil
             lastPushError = msg
+            pushPhase = .idle
         } else {
-            log.default("DiaWatch push complete")
-            lastPushDate = Date()
-            lastPushError = nil
+            onTransmissionComplete?()
+            onTransmissionComplete = nil
+            // pushPhase is already .success; fade back to idle after a moment
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                self?.pushPhase = .idle
+            }
         }
     }
 }
