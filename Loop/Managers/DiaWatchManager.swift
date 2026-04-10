@@ -14,6 +14,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
     static let nusServiceUUID = CBUUID(string: "6e400001-b5a3-f393-e0a9-e50e24dcca9e")
     static let nusRXCharUUID  = CBUUID(string: "6e400002-b5a3-f393-e0a9-e50e24dcca9e")
+    static let nusTXCharUUID  = CBUUID(string: "6e400003-b5a3-f393-e0a9-e50e24dcca9e")
 
     // MARK: - Published state (drives settings UI)
 
@@ -38,6 +39,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
     private var pendingChunks: [Data] = []
     private var isSending = false
     private var scanTimer: Timer?
+    private var sendTimeoutTimer: Timer?
+    private static let sendTimeout: TimeInterval = 15
 
     private weak var deviceManager: DeviceDataManager?
     private let log = DiagnosticLog(category: "DiaWatchManager")
@@ -100,7 +103,32 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
         isSending = true
         log.default("Sending DiaWatch reading: %{public}@", message)
+        startSendTimeout()
         connectOrScan()
+    }
+
+    private func startSendTimeout() {
+        sendTimeoutTimer?.invalidate()
+        sendTimeoutTimer = Timer.scheduledTimer(withTimeInterval: Self.sendTimeout, repeats: false) { [weak self] _ in
+            guard let self, self.isSending else { return }
+            self.log.error("DiaWatch send timed out after %{public}g s", Self.sendTimeout)
+            if let p = self.peripheral { self.central.cancelPeripheralConnection(p) }
+            self.abortSend(error: "Send timed out")
+        }
+    }
+
+    private func cancelSendTimeout() {
+        sendTimeoutTimer?.invalidate()
+        sendTimeoutTimer = nil
+    }
+
+    private func abortSend(error: String) {
+        cancelSendTimeout()
+        isSending = false
+        pendingChunks = []
+        peripheral = nil
+        rxCharacteristic = nil
+        lastPushError = error
     }
 
     private func connectOrScan() {
@@ -165,7 +193,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
         guard let p = peripheral, let rx = rxCharacteristic else { return }
 
         guard !pendingChunks.isEmpty else {
-            // All chunks sent — wait 2 s then disconnect cleanly
+            // All chunks sent — cancel timeout, wait 2 s then disconnect cleanly
+            cancelSendTimeout()
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 guard let self, let p = self.peripheral else { return }
                 self.central.cancelPeripheralConnection(p)
@@ -247,13 +276,13 @@ extension DiaWatchManager: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         log.error("DiaWatch connection failed: %{public}@", error?.localizedDescription ?? "unknown")
-        isSending = false
-        pendingChunks = []
-        lastPushError = error?.localizedDescription ?? "Connection failed"
+        abortSend(error: error?.localizedDescription ?? "Connection failed")
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        cancelSendTimeout()
         rxCharacteristic = nil
+        self.peripheral = nil
         let wasStillSending = isSending && !pendingChunks.isEmpty
         isSending = false
         pendingChunks = []
@@ -282,18 +311,40 @@ extension DiaWatchManager: CBPeripheralDelegate {
             central.cancelPeripheralConnection(peripheral)
             return
         }
-        peripheral.discoverCharacteristics([Self.nusRXCharUUID], for: service)
+        peripheral.discoverCharacteristics([Self.nusRXCharUUID, Self.nusTXCharUUID], for: service)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
-        guard error == nil,
-              let rx = service.characteristics?.first(where: { $0.uuid == Self.nusRXCharUUID })
-        else {
-            log.error("DiaWatch characteristic discovery error: %{public}@", error?.localizedDescription ?? "NUS RX not found")
+        guard error == nil else {
+            log.error("DiaWatch characteristic discovery error: %{public}@", error!.localizedDescription)
+            central.cancelPeripheralConnection(peripheral)
+            return
+        }
+
+        guard let rx = service.characteristics?.first(where: { $0.uuid == Self.nusRXCharUUID }) else {
+            log.error("DiaWatch NUS RX characteristic not found")
             central.cancelPeripheralConnection(peripheral)
             return
         }
         rxCharacteristic = rx
+
+        // Subscribe to TX notifications — wasp-os NUS only activates its RX
+        // handler once the central has enabled notifications on TX.
+        if let tx = service.characteristics?.first(where: { $0.uuid == Self.nusTXCharUUID }) {
+            peripheral.setNotifyValue(true, for: tx)
+            // writeNextChunk() will be called from didUpdateNotificationStateFor
+        } else {
+            // TX not found — try writing anyway
+            log.default("DiaWatch NUS TX characteristic not found, writing without subscription")
+            writeNextChunk()
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
+        if let error = error {
+            log.error("DiaWatch TX notify error: %{public}@", error.localizedDescription)
+        }
+        // TX subscription done (or failed) — start writing to RX regardless
         writeNextChunk()
     }
 
