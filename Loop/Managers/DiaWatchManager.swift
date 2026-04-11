@@ -141,7 +141,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
     // MARK: - Haptic slot configuration
 
     func applyHapticSlots() {
-        guard !isSending, UserDefaults.standard.diaWatchPeripheralID != nil else { return }
+        guard !isSending else { return }
 
         // Persist before sending
         UserDefaults.standard.diaWatchHapticSlots = hapticSlots
@@ -157,6 +157,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let message = lines.joined()
         log.default("Sending DiaWatch haptic config: %{public}@", message)
         beginTransmission(message) { [weak self] in
+            self?.lastPushError = nil
             self?.log.default("DiaWatch haptic config applied")
         }
     }
@@ -164,7 +165,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
     // MARK: - Watch config
 
     func sendConfig() {
-        guard !isSending, UserDefaults.standard.diaWatchPeripheralID != nil else { return }
+        guard !isSending else { return }
 
         UserDefaults.standard.diaWatchHapOnReading = hapOnReading
         UserDefaults.standard.diaWatchWakeOnReading = wakeOnReading
@@ -172,6 +173,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let message = "GB({\"face\":\"diawatch\",\"t\":\"s_c\",\"hap\":\(hapOnReading ? 1 : 0),\"wake\":\(wakeOnReading ? 1 : 0)})\r\n"
         log.default("Sending DiaWatch config: %{public}@", message)
         beginTransmission(message) { [weak self] in
+            self?.lastPushError = nil
             self?.log.default("DiaWatch config applied")
         }
     }
@@ -179,7 +181,13 @@ final class DiaWatchManager: NSObject, ObservableObject {
     // MARK: - Base transmission
 
     private func beginTransmission(_ message: String, onComplete: (() -> Void)? = nil) {
-        guard !isSending, UserDefaults.standard.diaWatchPeripheralID != nil else { return }
+        guard !isSending else { return }
+
+        guard UserDefaults.standard.diaWatchPeripheralID != nil else {
+            simulateNoDevice()
+            return
+        }
+
         guard let data = message.data(using: .utf8) else { return }
 
         pendingChunks = stride(from: 0, to: data.count, by: 20).map {
@@ -191,6 +199,17 @@ final class DiaWatchManager: NSObject, ObservableObject {
         pushPhase = .connecting
         startSendTimeout()
         connectOrScan()
+    }
+
+    private func simulateNoDevice() {
+        isSending = true
+        pushPhase = .connecting
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self else { return }
+            self.lastPushError = "No device paired"
+            self.isSending = false
+            self.pushPhase = .idle
+        }
     }
 
     private func startSendTimeout() {

@@ -15,6 +15,17 @@ struct DiaWatchSettingsView: View {
     @State private var hapticsDirty = false
     @State private var configDirty = false
 
+    private enum ActiveButton { case none, test, haptics, config }
+    @State private var activeButton: ActiveButton = .none
+
+    struct ButtonStatus {
+        var text: String
+        var isError: Bool
+    }
+    @State private var hapticStatus: ButtonStatus? = nil
+    @State private var configStatus: ButtonStatus? = nil
+    @State private var testStatus: ButtonStatus? = nil
+
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateStyle = .none
@@ -28,21 +39,50 @@ struct DiaWatchSettingsView: View {
 
     var body: some View {
         Form {
-            deviceSection
             statusSection
             hapticsSection
             preferencesSection
+            debugSection
         }
         .navigationBarTitle("DiaWatch", displayMode: .inline)
         .onChange(of: manager.hapticSlots) { _ in hapticsDirty = true }
         .onChange(of: manager.hapOnReading) { _ in configDirty = true }
         .onChange(of: manager.wakeOnReading) { _ in configDirty = true }
+        .onChange(of: manager.pushPhase) { phase in
+            guard phase == .idle else { return }
+
+            let isError = manager.lastPushError != nil
+            let which = activeButton
+            activeButton = .none
+
+            let text: String
+            switch which {
+            case .test:    text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
+            case .haptics: text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
+            case .config:  text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
+            case .none:    return
+            }
+
+            let status = ButtonStatus(text: text, isError: isError)
+            switch which {
+            case .test:
+                testStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { testStatus = nil }
+            case .haptics:
+                hapticStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { hapticStatus = nil }
+            case .config:
+                configStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { configStatus = nil }
+            case .none: break
+            }
+        }
     }
 
-    // MARK: - Sections
+    // MARK: - Status
 
-    private var deviceSection: some View {
-        Section(header: Text("Paired Device")) {
+    private var statusSection: some View {
+        Section(header: Text("Status")) {
             if let name = manager.pairedDeviceName {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
@@ -95,12 +135,7 @@ struct DiaWatchSettingsView: View {
                     manager.startScan()
                 }
             }
-        }
-    }
 
-    private var statusSection: some View {
-        Section(header: Text("Status")) {
-            pushPhaseRow
             if let date = manager.lastPushDate {
                 HStack {
                     Text("Last push")
@@ -113,28 +148,13 @@ struct DiaWatchSettingsView: View {
                             .foregroundColor(.secondary)
                     }
                 }
-            }
-            if let error = manager.lastPushError {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
-                    Text(error).foregroundColor(.secondary).font(.caption)
-                }
-            }
-            if manager.lastPushDate == nil && manager.lastPushError == nil && manager.pushPhase == .idle {
+            } else if manager.pairedDeviceName != nil {
                 Text("No readings sent yet").foregroundColor(.secondary)
-            }
-
-            if manager.pairedDeviceName != nil {
-                Stepper(value: $testMgdl, in: 40...400, step: 5) {
-                    Text("Test: \(testMgdl) mg/dL")
-                }
-                Button("Send test reading") {
-                    manager.pushTest(mgdl: testMgdl)
-                }
-                .disabled(manager.pushPhase != .idle)
             }
         }
     }
+
+    // MARK: - Haptics
 
     private var hapticsSection: some View {
         Section(
@@ -144,11 +164,16 @@ struct DiaWatchSettingsView: View {
             ForEach(manager.hapticSlots.indices, id: \.self) { idx in
                 hapticSlotRow(idx: idx)
             }
-            applyButton(dirty: hapticsDirty) {
+            actionRow(
+                label: "Save",
+                id: .haptics,
+                dirty: hapticsDirty,
+                status: hapticStatus
+            ) {
+                activeButton = .haptics
                 manager.applyHapticSlots()
                 hapticsDirty = false
             }
-            .disabled(manager.pairedDeviceName == nil || manager.pushPhase != .idle)
         }
     }
 
@@ -196,67 +221,87 @@ struct DiaWatchSettingsView: View {
         .padding(.vertical, 2)
     }
 
+    // MARK: - Preferences
+
     private var preferencesSection: some View {
         Section(header: Text("Preferences")) {
             Toggle("Haptic on every reading", isOn: $manager.hapOnReading)
             Toggle("Wake screen on new reading", isOn: $manager.wakeOnReading)
-            applyButton(dirty: configDirty) {
+            actionRow(
+                label: "Save",
+                id: .config,
+                dirty: configDirty,
+                status: configStatus
+            ) {
+                activeButton = .config
                 manager.sendConfig()
                 configDirty = false
             }
-            .disabled(manager.pairedDeviceName == nil || manager.pushPhase != .idle)
         }
     }
 
-    // MARK: - Shared apply button
+    // MARK: - Debug
 
-    private func applyButton(dirty: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Text("Apply to watch")
-                if dirty {
-                    Image(systemName: "exclamationmark.circle.fill")
-                        .foregroundColor(.orange)
+    private var debugSection: some View {
+        Section(header: Text("Debug")) {
+            Stepper(value: $testMgdl, in: 40...400, step: 5) {
+                Text("Test value: \(testMgdl) mg/dL")
+            }
+            actionRow(
+                label: "Send test reading",
+                id: .test,
+                dirty: false,
+                status: testStatus
+            ) {
+                activeButton = .test
+                manager.pushTest(mgdl: testMgdl)
+            }
+        }
+    }
+
+    // MARK: - Shared action row
+
+    private func actionRow(
+        label: String,
+        id: ActiveButton,
+        dirty: Bool,
+        status: ButtonStatus?,
+        action: @escaping () -> Void
+    ) -> some View {
+        let isSending = manager.pushPhase != .idle
+        let isActive = activeButton == id
+
+        return HStack {
+            Button(action: action) {
+                Text(label)
+                    .foregroundColor(isSending ? .secondary : (dirty ? .orange : .accentColor))
+            }
+            .disabled(isSending)
+
+            Spacer()
+
+            if isActive && isSending {
+                HStack(spacing: 5) {
+                    ProgressView().scaleEffect(0.75)
+                    Text("Sending…").font(.caption).foregroundColor(.secondary)
                 }
+            } else if let s = status {
+                HStack(spacing: 4) {
+                    Image(systemName: s.isError ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundColor(s.isError ? .orange : .green)
+                    Text(s.text).font(.caption).foregroundColor(s.isError ? .orange : .green)
+                }
+            } else if dirty {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.caption)
+                    .foregroundColor(.orange)
             }
-            .foregroundColor(dirty ? .orange : .accentColor)
-        }
-    }
-
-    // MARK: - Push phase row
-
-    @ViewBuilder
-    private var pushPhaseRow: some View {
-        switch manager.pushPhase {
-        case .idle:
-            EmptyView()
-        case .connecting:
-            HStack(spacing: 8) {
-                ProgressView()
-                Image(systemName: "antenna.radiowaves.left.and.right")
-                    .foregroundColor(.accentColor)
-                Text("Connecting…").foregroundColor(.secondary)
-            }
-        case .sending:
-            HStack(spacing: 8) {
-                ProgressView()
-                Image(systemName: "arrow.up.circle.fill")
-                    .foregroundColor(.accentColor)
-                Text("Sending…").foregroundColor(.secondary)
-            }
-        case .success:
-            HStack(spacing: 8) {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundColor(.green)
-                Text("Sent!").foregroundColor(.green)
-            }
-            .transition(.opacity)
         }
     }
 
     // MARK: - Helpers
 
-    /// Green > -60, yellow -60…-80, red < -80
     private func rssiColor(_ rssi: Int) -> Color {
         switch rssi {
         case (-60)...: return .green
