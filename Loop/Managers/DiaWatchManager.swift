@@ -25,10 +25,10 @@ final class DiaWatchManager: NSObject, ObservableObject {
         var pat: String     // pattern name
 
         static let allPatterns: [String] = [
-            "simple_pulse", "single_buzz", "double_tap", "short_long", "long_short",
-            "triple_tap", "notification", "notification_single", "heartbeat",
-            "bounce", "rbounce", "countdown", "stutter",
-            "urgent", "sos", "fanfare", "linear_ramp", "uprising_sweep"
+            "simple_pulse", "notification_single", "single_buzz", "triple_tap",
+            "heartbeat", "urgent", "linear_ramp", "short_long", "long_short",
+            "double_tap", "notification", "bounce", "rbounce", "countdown",
+            "stutter", "sos", "fanfare", "uprising_sweep"
         ]
 
         static let defaults: [HapticSlot] = (0..<5).map { _ in
@@ -182,6 +182,21 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let first = commands[0]
         log.default("Sending DiaWatch haptic slot 0: %{public}@", first.0)
         beginTransmission(first.0, onComplete: first.1)
+    }
+
+    // MARK: - Haptic test
+
+    func testHaptic(name: String) {
+        guard !isSending else { return }
+        let message = "import wasp; wasp.Haptics.\(name)()\r\n"
+        log.default("Sending DiaWatch test haptic: %{public}@", name)
+        beginTransmission(message) { [weak self] in
+            guard let self else { return }
+            if !self.receivedResponse {
+                self.lastPushError = "No response from watch"
+            }
+            self.log.default("DiaWatch test haptic complete")
+        }
     }
 
     // MARK: - Watch config

@@ -15,7 +15,7 @@ struct DiaWatchSettingsView: View {
     @State private var hapticsDirty = false
     @State private var configDirty = false
 
-    private enum ActiveButton { case none, test, haptics, config }
+    private enum ActiveButton { case none, test, haptics, config, testHaptic }
     @State private var activeButton: ActiveButton = .none
 
     struct ButtonStatus {
@@ -25,6 +25,8 @@ struct DiaWatchSettingsView: View {
     @State private var hapticStatus: ButtonStatus? = nil
     @State private var configStatus: ButtonStatus? = nil
     @State private var testStatus: ButtonStatus? = nil
+    @State private var testHapticStatus: ButtonStatus? = nil
+    @State private var selectedHapticPattern: String = DiaWatchManager.HapticSlot.allPatterns[0]
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -41,6 +43,7 @@ struct DiaWatchSettingsView: View {
         Form {
             statusSection
             hapticsSection
+            testHapticsSection
             preferencesSection
             debugSection
         }
@@ -57,10 +60,11 @@ struct DiaWatchSettingsView: View {
 
             let text: String
             switch which {
-            case .test:    text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
-            case .haptics: text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
-            case .config:  text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
-            case .none:    return
+            case .test:        text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
+            case .haptics:     text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
+            case .config:      text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
+            case .testHaptic:  text = isError ? (manager.lastPushError ?? "Failed") : "Played!"
+            case .none:        return
             }
 
             let status = ButtonStatus(text: text, isError: isError)
@@ -74,6 +78,9 @@ struct DiaWatchSettingsView: View {
             case .config:
                 configStatus = status
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { configStatus = nil }
+            case .testHaptic:
+                testHapticStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { testHapticStatus = nil }
             case .none: break
             }
         }
@@ -219,6 +226,32 @@ struct DiaWatchSettingsView: View {
             }
         }
         .padding(.vertical, 2)
+    }
+
+    // MARK: - Test Haptics
+
+    private var testHapticsSection: some View {
+        Section(
+            header: Text("Test Haptics"),
+            footer: Text("Sends a MicroPython command to the watch to play the selected pattern immediately.")
+        ) {
+            Picker("Pattern", selection: $selectedHapticPattern) {
+                ForEach(DiaWatchManager.HapticSlot.allPatterns, id: \.self) { pat in
+                    Text(Self.formatPattern(pat)).tag(pat)
+                }
+            }
+            .pickerStyle(.menu)
+
+            actionRow(
+                label: "Play",
+                id: .testHaptic,
+                dirty: false,
+                status: testHapticStatus
+            ) {
+                activeButton = .testHaptic
+                manager.testHaptic(name: selectedHapticPattern)
+            }
+        }
     }
 
     // MARK: - Preferences
