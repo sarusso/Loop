@@ -136,7 +136,13 @@ final class DiaWatchManager: NSObject, ObservableObject {
             guard let self else { return }
             self.lastPushDate = Date()
             self.lastPushValue = self.lastSentMgdl
-            self.lastPushError = nil
+            if self.receivedResponse {
+                self.lastPushError = self.bleResponse.contains("reading received")
+                    ? nil
+                    : "Unexpected watch response"
+            } else {
+                self.lastPushError = "No response from watch"
+            }
             self.log.default("DiaWatch push complete")
         }
     }
@@ -160,8 +166,9 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let message = lines.joined()
         log.default("Sending DiaWatch haptic config: %{public}@", message)
         beginTransmission(message) { [weak self] in
-            self?.lastPushError = nil
-            self?.log.default("DiaWatch haptic config applied")
+            guard let self else { return }
+            self.lastPushError = self.receivedResponse ? nil : "No response from watch"
+            self.log.default("DiaWatch haptic config applied")
         }
     }
 
@@ -176,8 +183,9 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let message = "GB({\"face\":\"diawatch\",\"t\":\"s_c\",\"hap\":\(hapOnReading ? 1 : 0),\"wake\":\(wakeOnReading ? 1 : 0)})\r\n"
         log.default("Sending DiaWatch config: %{public}@", message)
         beginTransmission(message) { [weak self] in
-            self?.lastPushError = nil
-            self?.log.default("DiaWatch config applied")
+            guard let self else { return }
+            self.lastPushError = self.receivedResponse ? nil : "No response from watch"
+            self.log.default("DiaWatch config applied")
         }
     }
 
@@ -414,9 +422,6 @@ extension DiaWatchManager: CBCentralManagerDelegate {
         } else {
             onTransmissionComplete?()
             onTransmissionComplete = nil
-            if !receivedResponse {
-                lastPushError = "No response from watch"
-            }
             // pushPhase is already .success; fade back to idle after a moment
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
                 self?.pushPhase = .idle
