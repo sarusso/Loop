@@ -75,6 +75,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
     private var onTransmissionComplete: (() -> Void)?
     private var receivedResponse = false
     private var responseSessionStarted = false
+    private var replPromptCount = 0
     private var transmissionQueue: [(message: String, onComplete: (() -> Void)?)] = []
     private var scanTimer: Timer?
     private var sendTimeoutTimer: Timer?
@@ -259,6 +260,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         onTransmissionComplete = onComplete
         receivedResponse = false
         responseSessionStarted = false
+        replPromptCount = 0
         pushPhase = .connecting
         startSendTimeout()
         connectOrScan()
@@ -566,6 +568,8 @@ extension DiaWatchManager: CBPeripheralDelegate {
         receivedResponse = true
         bleResponse += text
         log.default("DiaWatch TX: %{public}@", text)
-        armResponseTimer(delay: Self.responseIdleTimeout)
+        replPromptCount += text.components(separatedBy: ">>>").count - 1
+        let delay: TimeInterval = replPromptCount >= 2 ? 0.2 : replPromptCount == 1 ? 0.5 : Self.responseIdleTimeout
+        armResponseTimer(delay: delay)
     }
 }
