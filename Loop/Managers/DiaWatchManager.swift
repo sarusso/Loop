@@ -79,6 +79,9 @@ final class DiaWatchManager: NSObject, ObservableObject {
     private var scanTimer: Timer?
     private var sendTimeoutTimer: Timer?
     private static let sendTimeout: TimeInterval = 15
+    private var responseTimer: Timer?
+    private static let responseInitialTimeout: TimeInterval = 20  // max wait for first byte
+    private static let responseIdleTimeout: TimeInterval = 1.5    // disconnect after this much silence
 
     private weak var deviceManager: DeviceDataManager?
     private let log = DiagnosticLog(category: "DiaWatchManager")
@@ -287,8 +290,23 @@ final class DiaWatchManager: NSObject, ObservableObject {
         sendTimeoutTimer = nil
     }
 
+    private func armResponseTimer(delay: TimeInterval) {
+        responseTimer?.invalidate()
+        responseTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            guard let self, let p = self.peripheral else { return }
+            self.log.default("DiaWatch response timer fired — disconnecting")
+            self.central.cancelPeripheralConnection(p)
+        }
+    }
+
+    private func cancelResponseTimer() {
+        responseTimer?.invalidate()
+        responseTimer = nil
+    }
+
     private func abortSend(error: String) {
         cancelSendTimeout()
+        cancelResponseTimer()
         isSending = false
         pendingChunks = []
         peripheral = nil
@@ -364,13 +382,12 @@ final class DiaWatchManager: NSObject, ObservableObject {
         guard let p = peripheral, let rx = rxCharacteristic else { return }
 
         guard !pendingChunks.isEmpty else {
-            // All chunks sent — cancel timeout, wait 2 s then disconnect cleanly
+            // All chunks sent — cancel send timeout
             cancelSendTimeout()
             pushPhase = .success
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                guard let self, let p = self.peripheral else { return }
-                self.central.cancelPeripheralConnection(p)
-            }
+            // Arm response timer: watch has responseInitialTimeout to start responding,
+            // then responseIdleTimeout of silence triggers disconnect.
+            armResponseTimer(delay: Self.responseInitialTimeout)
             return
         }
 
@@ -455,6 +472,7 @@ extension DiaWatchManager: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         cancelSendTimeout()
+        cancelResponseTimer()
         rxCharacteristic = nil
         self.peripheral = nil
         let wasStillSending = isSending && !pendingChunks.isEmpty
@@ -548,5 +566,6 @@ extension DiaWatchManager: CBPeripheralDelegate {
         receivedResponse = true
         bleResponse += text
         log.default("DiaWatch TX: %{public}@", text)
+        armResponseTimer(delay: Self.responseIdleTimeout)
     }
 }
