@@ -62,6 +62,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
     @Published var hapticSlots: [HapticSlot] = UserDefaults.standard.diaWatchHapticSlots
     @Published var hapOnReading: Bool = UserDefaults.standard.diaWatchHapOnReading
     @Published var wakeOnReading: Bool = UserDefaults.standard.diaWatchWakeOnReading
+    @Published var bleResponse: String = ""
 
     // MARK: - Private state
 
@@ -72,6 +73,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
     private var isSending = false
     private var lastSentMgdl: Int = 0
     private var onTransmissionComplete: (() -> Void)?
+    private var receivedResponse = false
+    private var responseSessionStarted = false
     private var scanTimer: Timer?
     private var sendTimeoutTimer: Timer?
     private static let sendTimeout: TimeInterval = 15
@@ -196,6 +199,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
         isSending = true
         onTransmissionComplete = onComplete
+        receivedResponse = false
+        responseSessionStarted = false
         pushPhase = .connecting
         startSendTimeout()
         connectOrScan()
@@ -293,6 +298,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         lastPushDate = nil
         lastPushValue = nil
         lastPushError = nil
+        bleResponse = ""
         log.default("Forgot DiaWatch device")
     }
 
@@ -408,6 +414,9 @@ extension DiaWatchManager: CBCentralManagerDelegate {
         } else {
             onTransmissionComplete?()
             onTransmissionComplete = nil
+            if !receivedResponse {
+                lastPushError = "No response from watch"
+            }
             // pushPhase is already .success; fade back to idle after a moment
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
                 self?.pushPhase = .idle
@@ -467,5 +476,18 @@ extension DiaWatchManager: CBPeripheralDelegate {
 
     func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
         writeNextChunk()
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        guard error == nil,
+              let data = characteristic.value,
+              let text = String(data: data, encoding: .utf8) else { return }
+        if !responseSessionStarted {
+            bleResponse = ""
+            responseSessionStarted = true
+        }
+        receivedResponse = true
+        bleResponse += text
+        log.default("DiaWatch TX: %{public}@", text)
     }
 }

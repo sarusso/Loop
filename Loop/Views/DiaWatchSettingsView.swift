@@ -256,6 +256,34 @@ struct DiaWatchSettingsView: View {
                 activeButton = .test
                 manager.pushTest(mgdl: testMgdl)
             }
+
+            Button("Get log") {}
+                .foregroundColor(.secondary)
+                .disabled(true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Last transmission response")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        Text(manager.bleResponse.isEmpty ? "No response yet" : manager.bleResponse)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundColor(manager.bleResponse.isEmpty ? .secondary : .primary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(6)
+                        Color.clear.frame(height: 1).id("ble_bottom")
+                    }
+                    .frame(height: 120)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(6)
+                    .onChange(of: manager.bleResponse) { _ in
+                        proxy.scrollTo("ble_bottom", anchor: .bottom)
+                    }
+                }
+            }
+            .padding(.vertical, 4)
         }
     }
 
@@ -274,7 +302,7 @@ struct DiaWatchSettingsView: View {
         return HStack {
             Button(action: action) {
                 Text(label)
-                    .foregroundColor(isSending ? .secondary : (dirty ? .orange : .accentColor))
+                    .foregroundColor(isSending ? .secondary : .accentColor)
             }
             .disabled(isSending)
 
@@ -293,9 +321,9 @@ struct DiaWatchSettingsView: View {
                     Text(s.text).font(.caption).foregroundColor(s.isError ? .orange : .green)
                 }
             } else if dirty {
-                Image(systemName: "exclamationmark.circle.fill")
-                    .font(.caption)
-                    .foregroundColor(.orange)
+                Circle()
+                    .fill(Color.secondary.opacity(0.4))
+                    .frame(width: 7, height: 7)
             }
         }
     }
