@@ -15,7 +15,7 @@ struct DiaWatchSettingsView: View {
     @State private var hapticsDirty = false
     @State private var configDirty = false
 
-    private enum ActiveButton { case none, test, haptics, config, testHaptic }
+    private enum ActiveButton { case none, test, haptics, config, testHaptic, customCommand, getLog }
     @State private var activeButton: ActiveButton = .none
 
     struct ButtonStatus {
@@ -27,6 +27,9 @@ struct DiaWatchSettingsView: View {
     @State private var testStatus: ButtonStatus? = nil
     @State private var testHapticStatus: ButtonStatus? = nil
     @State private var selectedHapticPattern: String = DiaWatchManager.HapticSlot.allPatterns[0]
+    @State private var customCommandStatus: ButtonStatus? = nil
+    @State private var customCommandText: String = ""
+    @State private var getLogStatus: ButtonStatus? = nil
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -63,8 +66,10 @@ struct DiaWatchSettingsView: View {
             case .test:        text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
             case .haptics:     text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
             case .config:      text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
-            case .testHaptic:  text = isError ? (manager.lastPushError ?? "Failed") : "Played!"
-            case .none:        return
+            case .testHaptic:     text = isError ? (manager.lastPushError ?? "Failed") : "Played!"
+            case .customCommand:  text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
+            case .getLog:         text = isError ? (manager.lastPushError ?? "Failed") : "Done!"
+            case .none:           return
             }
 
             let status = ButtonStatus(text: text, isError: isError)
@@ -81,6 +86,12 @@ struct DiaWatchSettingsView: View {
             case .testHaptic:
                 testHapticStatus = status
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { testHapticStatus = nil }
+            case .customCommand:
+                customCommandStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { customCommandStatus = nil }
+            case .getLog:
+                getLogStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { getLogStatus = nil }
             case .none: break
             }
         }
@@ -290,9 +301,32 @@ struct DiaWatchSettingsView: View {
                 manager.pushTest(mgdl: testMgdl)
             }
 
-            Button("Get log") {}
-                .foregroundColor(.secondary)
-                .disabled(true)
+            VStack(alignment: .leading, spacing: 6) {
+                TextField("Custom command", text: $customCommandText)
+                    .font(.system(.body, design: .monospaced))
+                    .autocapitalization(.none)
+                    .disableAutocorrection(true)
+                actionRow(
+                    label: "Send",
+                    id: .customCommand,
+                    dirty: false,
+                    status: customCommandStatus
+                ) {
+                    activeButton = .customCommand
+                    manager.sendCustomCommand(customCommandText)
+                }
+            }
+            .padding(.vertical, 2)
+
+            actionRow(
+                label: "Get log",
+                id: .getLog,
+                dirty: false,
+                status: getLogStatus
+            ) {
+                activeButton = .getLog
+                manager.sendCustomCommand("import wasp; wasp.log_dump()")
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Last transmission response")

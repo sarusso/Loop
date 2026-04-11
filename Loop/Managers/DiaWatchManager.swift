@@ -184,6 +184,21 @@ final class DiaWatchManager: NSObject, ObservableObject {
         beginTransmission(first.0, onComplete: first.1)
     }
 
+    // MARK: - Custom command
+
+    func sendCustomCommand(_ text: String) {
+        guard !isSending, !text.isEmpty else { return }
+        let message = text.hasSuffix("\r\n") ? text : text + "\r\n"
+        log.default("Sending DiaWatch custom command: %{public}@", text)
+        beginTransmission(message) { [weak self] in
+            guard let self else { return }
+            if !self.receivedResponse {
+                self.lastPushError = "No response from watch"
+            }
+            self.log.default("DiaWatch custom command complete")
+        }
+    }
+
     // MARK: - Haptic test
 
     func testHaptic(name: String) {
