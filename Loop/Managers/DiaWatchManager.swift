@@ -75,6 +75,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
     private var onTransmissionComplete: (() -> Void)?
     private var receivedResponse = false
     private var responseSessionStarted = false
+    private var transmissionQueue: [(message: String, onComplete: (() -> Void)?)] = []
     private var scanTimer: Timer?
     private var sendTimeoutTimer: Timer?
     private static let sendTimeout: TimeInterval = 15
@@ -152,24 +153,35 @@ final class DiaWatchManager: NSObject, ObservableObject {
     func applyHapticSlots() {
         guard !isSending else { return }
 
-        // Persist before sending
         UserDefaults.standard.diaWatchHapticSlots = hapticSlots
 
-        // Build one concatenated transmission (watch parses line by line)
-        let lines = hapticSlots.enumerated().map { idx, slot -> String in
-            if slot.enabled {
-                return "GB({\"face\":\"diawatch\",\"t\":\"s_h\",\"idx\":\(idx),\"op\":\"\(slot.op)\",\"thr\":\(slot.thr),\"pat\":\"\(slot.pat)\"})\r\n"
-            } else {
-                return "GB({\"face\":\"diawatch\",\"t\":\"d_h\",\"idx\":\(idx)})\r\n"
-            }
+        // Each slot is sent as its own BLE session so the watch REPL can
+        // finish processing one command before receiving the next.
+        var commands: [(String, (() -> Void)?)] = hapticSlots.enumerated().map { idx, slot in
+            let msg = slot.enabled
+                ? "GB({\"face\":\"diawatch\",\"t\":\"s_h\",\"idx\":\(idx),\"op\":\"\(slot.op)\",\"thr\":\(slot.thr),\"pat\":\"\(slot.pat)\"})\r\n"
+                : "GB({\"face\":\"diawatch\",\"t\":\"d_h\",\"idx\":\(idx)})\r\n"
+            return (msg, nil)
         }
-        let message = lines.joined()
-        log.default("Sending DiaWatch haptic config: %{public}@", message)
-        beginTransmission(message) { [weak self] in
+
+        // Attach completion only to the last command
+        let lastIdx = commands.count - 1
+        commands[lastIdx].1 = { [weak self] in
             guard let self else { return }
-            self.lastPushError = self.receivedResponse ? nil : "No response from watch"
+            if self.receivedResponse {
+                let ok = (self.bleResponse.contains("s_h") || self.bleResponse.contains("d_h"))
+                      && !self.bleResponse.contains("ERROR")
+                self.lastPushError = ok ? nil : "Watch rejected haptic config"
+            } else {
+                self.lastPushError = "No response from watch"
+            }
             self.log.default("DiaWatch haptic config applied")
         }
+
+        transmissionQueue = Array(commands.dropFirst())
+        let first = commands[0]
+        log.default("Sending DiaWatch haptic slot 0: %{public}@", first.0)
+        beginTransmission(first.0, onComplete: first.1)
     }
 
     // MARK: - Watch config
@@ -184,7 +196,12 @@ final class DiaWatchManager: NSObject, ObservableObject {
         log.default("Sending DiaWatch config: %{public}@", message)
         beginTransmission(message) { [weak self] in
             guard let self else { return }
-            self.lastPushError = self.receivedResponse ? nil : "No response from watch"
+            if self.receivedResponse {
+                let ok = self.bleResponse.contains("s_c") && !self.bleResponse.contains("ERROR")
+                self.lastPushError = ok ? nil : "Watch rejected config"
+            } else {
+                self.lastPushError = "No response from watch"
+            }
             self.log.default("DiaWatch config applied")
         }
     }
@@ -247,6 +264,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         peripheral = nil
         rxCharacteristic = nil
         onTransmissionComplete = nil
+        transmissionQueue = []
         lastPushError = error
         pushPhase = .idle
     }
@@ -419,6 +437,12 @@ extension DiaWatchManager: CBCentralManagerDelegate {
             onTransmissionComplete = nil
             lastPushError = msg
             pushPhase = .idle
+        } else if !transmissionQueue.isEmpty {
+            // More commands queued — send the next one without showing success yet
+            let next = transmissionQueue.removeFirst()
+            let slotIdx = (hapticSlots.count) - transmissionQueue.count - 1
+            log.default("Sending DiaWatch haptic slot %{public}d: %{public}@", slotIdx, next.message)
+            beginTransmission(next.message, onComplete: next.onComplete)
         } else {
             onTransmissionComplete?()
             onTransmissionComplete = nil
