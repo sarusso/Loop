@@ -98,6 +98,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
     private var responseTimer: Timer?
     private static let responseInitialTimeout: TimeInterval = 20  // max wait for first byte
     private static let responseIdleTimeout: TimeInterval = 1.5    // disconnect after this much silence
+    private var pendingCommandEcho: String?   // command text the REPL will echo back (no \r\n)
+    private var echoDetected = false          // true once pendingCommandEcho seen in TX stream
 
     private weak var deviceManager: DeviceDataManager?
     private let log = DiagnosticLog(category: "DiaWatchManager")
@@ -308,8 +310,13 @@ final class DiaWatchManager: NSObject, ObservableObject {
             return
         }
 
-        guard let data = message.data(using: .utf8) else { return }
+        guard let msgData = message.data(using: .utf8) else { return }
 
+        // Prepend \x03\x03 (double Ctrl+C) to clear any stuck REPL state.
+        // Store the clean command text so we can detect its echo in the TX stream.
+        pendingCommandEcho = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        echoDetected = false
+        let data = Data([0x03, 0x03]) + msgData
         pendingChunks = stride(from: 0, to: data.count, by: 20).map {
             Data(data[$0 ..< min($0 + 20, data.count)])
         }
@@ -373,6 +380,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
         rxCharacteristic = nil
         onTransmissionComplete = nil
         transmissionQueue = []
+        pendingCommandEcho = nil
+        echoDetected = false
         lastPushError = error
         pushPhase = .idle
     }
@@ -550,6 +559,9 @@ extension DiaWatchManager: CBCentralManagerDelegate {
         } else {
             onTransmissionComplete?()
             onTransmissionComplete = nil
+            if !echoDetected {
+                lastPushError = "No echo from watch"
+            }
             pushPhase = .idle
         }
     }
@@ -619,7 +631,30 @@ extension DiaWatchManager: CBPeripheralDelegate {
         receivedResponse = true
         bleResponse += text
         log.default("DiaWatch TX: %{public}@", text)
-        replPromptCount += text.components(separatedBy: ">>>").count - 1
+
+        var justDetectedEcho = false
+        if !echoDetected {
+            if let echo = pendingCommandEcho, bleResponse.contains(echo) {
+                echoDetected = true
+                pendingCommandEcho = nil
+                replPromptCount = 0
+                justDetectedEcho = true
+                // Count >>> only in the portion of bleResponse that follows the echo
+                if let echoRange = bleResponse.range(of: echo) {
+                    let afterEcho = String(bleResponse[echoRange.upperBound...])
+                    replPromptCount += afterEcho.components(separatedBy: ">>>").count - 1
+                }
+            } else {
+                // Still in preamble — keep idle timer alive but don't apply fast-disconnect yet
+                armResponseTimer(delay: Self.responseIdleTimeout)
+                return
+            }
+        }
+
+        if !justDetectedEcho {
+            replPromptCount += text.components(separatedBy: ">>>").count - 1
+        }
+
         let delay: TimeInterval = replPromptCount >= 2 ? 0.2 : replPromptCount == 1 ? 0.5 : Self.responseIdleTimeout
         armResponseTimer(delay: delay)
     }
