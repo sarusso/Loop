@@ -208,7 +208,6 @@ final class DiaWatchManager: NSObject, ObservableObject {
             hapticSlots: HapticSlot.defaults
         )
         presets.append(newPreset)
-        UserDefaults.standard.diaWatchPresets = presets
     }
 
     func deleteLastPreset() {
@@ -216,6 +215,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
         let lastIdx = presets.count - 1
         let wasActive = lastIdx == activePresetIndex
+        let isPersistedToPhone = lastIdx < UserDefaults.standard.diaWatchPresets.count
 
         presets.removeLast()
         if wasActive {
@@ -223,6 +223,9 @@ final class DiaWatchManager: NSObject, ObservableObject {
             UserDefaults.standard.diaWatchActivePresetIndex = 0
         }
         UserDefaults.standard.diaWatchPresets = presets
+
+        // If the preset was never saved to the phone, the watch doesn't know about it
+        guard isPersistedToPhone else { return }
 
         let deleteMsg = "GB({\"face\":\"diawatch\",\"t\":\"d_p\",\"p\":\(lastIdx)})\r\n"
         let deleteCompletion: () -> Void = { [weak self] in

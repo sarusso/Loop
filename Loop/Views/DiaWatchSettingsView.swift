@@ -9,6 +9,7 @@ import SwiftUI
 struct DiaWatchSettingsView: View {
 
     @ObservedObject var manager: DiaWatchManager
+    @Environment(\.dismiss) private var dismiss
 
     @State private var gearRotation: Double = 0
     @State private var testMgdl: Int = 190
@@ -25,6 +26,10 @@ struct DiaWatchSettingsView: View {
     @State private var savePresetStatus: ButtonStatus? = nil
     @State private var activatePresetStatus: ButtonStatus? = nil
     @State private var deletePresetStatus: ButtonStatus? = nil
+    @State private var showUnsavedChangesAlert = false
+    @State private var pendingPresetSwitch: Int = 0
+    @State private var pendingDismiss = false
+    @State private var pendingAddPreset = false
     @State private var testStatus: ButtonStatus? = nil
     @State private var testHapticStatus: ButtonStatus? = nil
     @State private var selectedHapticPattern: String = DiaWatchManager.HapticSlot.allPatterns[0]
@@ -51,8 +56,51 @@ struct DiaWatchSettingsView: View {
             debugSection
         }
         .navigationBarTitle("DiaWatch", displayMode: .inline)
+        .navigationBarBackButtonHidden(presetDirty)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                if presetDirty {
+                    Button {
+                        pendingDismiss = true
+                        showUnsavedChangesAlert = true
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold))
+                            Text("Settings")
+                        }
+                    }
+                }
+            }
+        }
         .onChange(of: manager.presets) { _ in presetDirty = true }
-        .onChange(of: selectedPresetIndex) { _ in presetDirty = false }
+        .alert("Unsaved Changes", isPresented: $showUnsavedChangesAlert) {
+            Button("Discard", role: .destructive) {
+                let savedPresets = UserDefaults.standard.diaWatchPresets
+                if selectedPresetIndex < savedPresets.count {
+                    manager.presets[selectedPresetIndex] = savedPresets[selectedPresetIndex]
+                } else {
+                    manager.presets.removeLast()
+                }
+                presetDirty = false
+                if pendingDismiss {
+                    pendingDismiss = false
+                    dismiss()
+                } else if pendingAddPreset {
+                    pendingAddPreset = false
+                    manager.addPreset()
+                    selectedPresetIndex = manager.presets.count - 1
+                    presetDirty = true
+                } else {
+                    selectedPresetIndex = min(pendingPresetSwitch, manager.presets.count - 1)
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDismiss = false
+                pendingAddPreset = false
+            }
+        } message: {
+            Text("The preset \"\(manager.presets[selectedPresetIndex].name)\" has unsaved changes. Discard them?")
+        }
         .onChange(of: manager.pushPhase) { phase in
             guard phase == .idle else { return }
 
@@ -182,7 +230,18 @@ struct DiaWatchSettingsView: View {
             header: Text("Configuration"),
             footer: Text("Tap Save to push the selected preset to the watch. Tap Activate to make it the active preset.")
         ) {
-            Picker("Preset", selection: $selectedPresetIndex) {
+            Picker("Preset", selection: Binding(
+                get: { selectedPresetIndex },
+                set: { newIdx in
+                    guard newIdx != selectedPresetIndex else { return }
+                    if presetDirty {
+                        pendingPresetSwitch = newIdx
+                        showUnsavedChangesAlert = true
+                    } else {
+                        selectedPresetIndex = newIdx
+                    }
+                }
+            )) {
                 ForEach(manager.presets.indices, id: \.self) { idx in
                     Text(manager.presets[idx].name + (idx == manager.activePresetIndex ? " (active)" : ""))
                         .tag(idx)
@@ -251,8 +310,14 @@ struct DiaWatchSettingsView: View {
             }
 
             Button("Add preset") {
-                manager.addPreset()
-                selectedPresetIndex = manager.presets.count - 1
+                if presetDirty {
+                    pendingAddPreset = true
+                    showUnsavedChangesAlert = true
+                } else {
+                    manager.addPreset()
+                    selectedPresetIndex = manager.presets.count - 1
+                    presetDirty = true
+                }
             }
         }
     }
