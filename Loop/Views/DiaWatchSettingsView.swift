@@ -12,18 +12,19 @@ struct DiaWatchSettingsView: View {
 
     @State private var gearRotation: Double = 0
     @State private var testMgdl: Int = 190
-    @State private var hapticsDirty = false
-    @State private var configDirty = false
+    @State private var selectedPresetIndex: Int = 0
+    @State private var presetDirty = false
 
-    private enum ActiveButton { case none, test, haptics, config, testHaptic, customCommand, getLog }
+    private enum ActiveButton { case none, test, savePreset, activatePreset, deletePreset, testHaptic, customCommand, getLog }
     @State private var activeButton: ActiveButton = .none
 
     struct ButtonStatus {
         var text: String
         var isError: Bool
     }
-    @State private var hapticStatus: ButtonStatus? = nil
-    @State private var configStatus: ButtonStatus? = nil
+    @State private var savePresetStatus: ButtonStatus? = nil
+    @State private var activatePresetStatus: ButtonStatus? = nil
+    @State private var deletePresetStatus: ButtonStatus? = nil
     @State private var testStatus: ButtonStatus? = nil
     @State private var testHapticStatus: ButtonStatus? = nil
     @State private var selectedHapticPattern: String = DiaWatchManager.HapticSlot.allPatterns[0]
@@ -45,15 +46,13 @@ struct DiaWatchSettingsView: View {
     var body: some View {
         Form {
             statusSection
-            hapticsSection
+            configurationSection
             testHapticsSection
-            preferencesSection
             debugSection
         }
         .navigationBarTitle("DiaWatch", displayMode: .inline)
-        .onChange(of: manager.hapticSlots) { _ in hapticsDirty = true }
-        .onChange(of: manager.hapOnReading) { _ in configDirty = true }
-        .onChange(of: manager.wakeOnReading) { _ in configDirty = true }
+        .onChange(of: manager.presets) { _ in presetDirty = true }
+        .onChange(of: selectedPresetIndex) { _ in presetDirty = false }
         .onChange(of: manager.pushPhase) { phase in
             guard phase == .idle else { return }
 
@@ -63,13 +62,14 @@ struct DiaWatchSettingsView: View {
 
             let text: String
             switch which {
-            case .test:        text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
-            case .haptics:     text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
-            case .config:      text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
-            case .testHaptic:     text = isError ? (manager.lastPushError ?? "Failed") : "Played!"
-            case .customCommand:  text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
-            case .getLog:         text = isError ? (manager.lastPushError ?? "Failed") : "Done!"
-            case .none:           return
+            case .test:          text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
+            case .savePreset:    text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
+            case .activatePreset: text = isError ? (manager.lastPushError ?? "Failed") : "Activated!"
+            case .deletePreset:   text = isError ? (manager.lastPushError ?? "Failed") : "Deleted!"
+            case .testHaptic:    text = isError ? (manager.lastPushError ?? "Failed") : "Played!"
+            case .customCommand: text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
+            case .getLog:        text = isError ? (manager.lastPushError ?? "Failed") : "Done!"
+            case .none:          return
             }
 
             let status = ButtonStatus(text: text, isError: isError)
@@ -77,12 +77,15 @@ struct DiaWatchSettingsView: View {
             case .test:
                 testStatus = status
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { testStatus = nil }
-            case .haptics:
-                hapticStatus = status
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { hapticStatus = nil }
-            case .config:
-                configStatus = status
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { configStatus = nil }
+            case .savePreset:
+                savePresetStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { savePresetStatus = nil }
+            case .activatePreset:
+                activatePresetStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { activatePresetStatus = nil }
+            case .deletePreset:
+                deletePresetStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { deletePresetStatus = nil }
             case .testHaptic:
                 testHapticStatus = status
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { testHapticStatus = nil }
@@ -172,42 +175,101 @@ struct DiaWatchSettingsView: View {
         }
     }
 
-    // MARK: - Haptics
+    // MARK: - Configuration
 
-    private var hapticsSection: some View {
+    private var configurationSection: some View {
         Section(
-            header: Text("Haptics"),
-            footer: Text("The watch evaluates these conditions on each incoming glucose reading and fires the selected pattern.")
+            header: Text("Configuration"),
+            footer: Text("Tap Save to push the selected preset to the watch. Tap Activate to make it the active preset.")
         ) {
-            ForEach(manager.hapticSlots.indices, id: \.self) { idx in
-                hapticSlotRow(idx: idx)
+            Picker("Preset", selection: $selectedPresetIndex) {
+                ForEach(manager.presets.indices, id: \.self) { idx in
+                    Text(manager.presets[idx].name + (idx == manager.activePresetIndex ? " (active)" : ""))
+                        .tag(idx)
+                }
             }
+            .pickerStyle(.menu)
+
+            HStack {
+                Text("Name")
+                Spacer()
+                TextField("preset name", text: Binding(
+                    get: { manager.presets[selectedPresetIndex].name },
+                    set: { manager.presets[selectedPresetIndex].name = $0 }
+                ))
+                .multilineTextAlignment(.trailing)
+                .foregroundColor(.secondary)
+            }
+
+            Toggle("Wake screen on new reading", isOn: Binding(
+                get: { manager.presets[selectedPresetIndex].wakeOnReading },
+                set: { manager.presets[selectedPresetIndex].wakeOnReading = $0 }
+            ))
+
+            Toggle("Haptic on every reading", isOn: Binding(
+                get: { manager.presets[selectedPresetIndex].hapOnReading },
+                set: { manager.presets[selectedPresetIndex].hapOnReading = $0 }
+            ))
+
+            ForEach(manager.presets[selectedPresetIndex].hapticSlots.indices, id: \.self) { idx in
+                hapticSlotRow(slotIdx: idx)
+            }
+
+            actionRow(
+                label: "Activate",
+                id: .activatePreset,
+                dirty: false,
+                status: activatePresetStatus,
+                disabled: selectedPresetIndex == manager.activePresetIndex
+            ) {
+                activeButton = .activatePreset
+                manager.activatePreset(at: selectedPresetIndex)
+            }
+
             actionRow(
                 label: "Save",
-                id: .haptics,
-                dirty: hapticsDirty,
-                status: hapticStatus
+                id: .savePreset,
+                dirty: presetDirty,
+                status: savePresetStatus
             ) {
-                activeButton = .haptics
-                manager.applyHapticSlots()
-                hapticsDirty = false
+                activeButton = .savePreset
+                manager.savePreset(at: selectedPresetIndex)
+                presetDirty = false
+            }
+
+            actionRow(
+                label: "Delete preset",
+                id: .deletePreset,
+                dirty: false,
+                status: deletePresetStatus,
+                disabled: manager.presets.count == 1 || selectedPresetIndex != manager.presets.count - 1,
+                labelColor: .red
+            ) {
+                activeButton = .deletePreset
+                manager.deleteLastPreset()
+                selectedPresetIndex = max(0, selectedPresetIndex - 1)
+            }
+
+            Button("Add preset") {
+                manager.addPreset()
+                selectedPresetIndex = manager.presets.count - 1
             }
         }
     }
 
     @ViewBuilder
-    private func hapticSlotRow(idx: Int) -> some View {
-        let slot = manager.hapticSlots[idx]
+    private func hapticSlotRow(slotIdx: Int) -> some View {
+        let slot = manager.presets[selectedPresetIndex].hapticSlots[slotIdx]
         VStack(alignment: .leading, spacing: 6) {
-            Toggle("Slot \(idx + 1)", isOn: Binding(
-                get: { manager.hapticSlots[idx].enabled },
-                set: { manager.hapticSlots[idx].enabled = $0 }
+            Toggle("Haptic slot \(slotIdx + 1)", isOn: Binding(
+                get: { manager.presets[selectedPresetIndex].hapticSlots[slotIdx].enabled },
+                set: { manager.presets[selectedPresetIndex].hapticSlots[slotIdx].enabled = $0 }
             ))
             if slot.enabled {
                 HStack(spacing: 12) {
                     Picker("", selection: Binding(
-                        get: { manager.hapticSlots[idx].op },
-                        set: { manager.hapticSlots[idx].op = $0 }
+                        get: { manager.presets[selectedPresetIndex].hapticSlots[slotIdx].op },
+                        set: { manager.presets[selectedPresetIndex].hapticSlots[slotIdx].op = $0 }
                     )) {
                         Text("Above").tag(">")
                         Text("Below").tag("<")
@@ -216,10 +278,10 @@ struct DiaWatchSettingsView: View {
                     .frame(maxWidth: 130)
 
                     Stepper(
-                        "\(manager.hapticSlots[idx].thr) mg/dL",
+                        "\(manager.presets[selectedPresetIndex].hapticSlots[slotIdx].thr) mg/dL",
                         value: Binding(
-                            get: { manager.hapticSlots[idx].thr },
-                            set: { manager.hapticSlots[idx].thr = $0 }
+                            get: { manager.presets[selectedPresetIndex].hapticSlots[slotIdx].thr },
+                            set: { manager.presets[selectedPresetIndex].hapticSlots[slotIdx].thr = $0 }
                         ),
                         in: 40...400,
                         step: 10
@@ -227,8 +289,8 @@ struct DiaWatchSettingsView: View {
                 }
 
                 Picker("Pattern", selection: Binding(
-                    get: { manager.hapticSlots[idx].pat },
-                    set: { manager.hapticSlots[idx].pat = $0 }
+                    get: { manager.presets[selectedPresetIndex].hapticSlots[slotIdx].pat },
+                    set: { manager.presets[selectedPresetIndex].hapticSlots[slotIdx].pat = $0 }
                 )) {
                     ForEach(DiaWatchManager.HapticSlot.allPatterns, id: \.self) { pat in
                         Text(Self.formatPattern(pat)).tag(pat)
@@ -261,25 +323,6 @@ struct DiaWatchSettingsView: View {
             ) {
                 activeButton = .testHaptic
                 manager.testHaptic(name: selectedHapticPattern)
-            }
-        }
-    }
-
-    // MARK: - Preferences
-
-    private var preferencesSection: some View {
-        Section(header: Text("Preferences")) {
-            Toggle("Haptic on every reading", isOn: $manager.hapOnReading)
-            Toggle("Wake screen on new reading", isOn: $manager.wakeOnReading)
-            actionRow(
-                label: "Save",
-                id: .config,
-                dirty: configDirty,
-                status: configStatus
-            ) {
-                activeButton = .config
-                manager.sendConfig()
-                configDirty = false
             }
         }
     }
@@ -361,17 +404,20 @@ struct DiaWatchSettingsView: View {
         id: ActiveButton,
         dirty: Bool,
         status: ButtonStatus?,
+        disabled: Bool = false,
+        labelColor: Color = .accentColor,
         action: @escaping () -> Void
     ) -> some View {
         let isSending = manager.pushPhase != .idle
+        let isDisabled = isSending || disabled
         let isActive = activeButton == id
 
         return HStack {
             Button(action: action) {
                 Text(label)
-                    .foregroundColor(isSending ? .secondary : .accentColor)
+                    .foregroundColor(isDisabled ? .secondary : labelColor)
             }
-            .disabled(isSending)
+            .disabled(isDisabled)
 
             Spacer()
 

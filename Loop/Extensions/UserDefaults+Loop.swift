@@ -19,9 +19,8 @@ extension UserDefaults {
         case favoriteFoods = "com.loopkit.Loop.favoriteFoods"
         case diaWatchPeripheralID = "com.loopkit.Loop.DiaWatch.peripheralID"
         case diaWatchDeviceName = "com.loopkit.Loop.DiaWatch.deviceName"
-        case diaWatchHapticSlots = "com.loopkit.Loop.DiaWatch.hapticSlots"
-        case diaWatchHapOnReading = "com.loopkit.Loop.DiaWatch.hapOnReading"
-        case diaWatchWakeOnReading = "com.loopkit.Loop.DiaWatch.wakeOnReading"
+        case diaWatchPresets = "com.loopkit.Loop.DiaWatch.presets"
+        case diaWatchActivePresetIndex = "com.loopkit.Loop.DiaWatch.activePresetIndex"
     }
 
     var legacyPumpManagerRawValue: PumpManager.RawValue? {
@@ -109,27 +108,22 @@ extension UserDefaults {
         set { set(newValue, forKey: Key.diaWatchDeviceName.rawValue) }
     }
 
-    var diaWatchHapticSlots: [DiaWatchManager.HapticSlot] {
+    var diaWatchPresets: [DiaWatchManager.Preset] {
         get {
-            guard let data = data(forKey: Key.diaWatchHapticSlots.rawValue),
-                  let slots = try? JSONDecoder().decode([DiaWatchManager.HapticSlot].self, from: data)
-            else { return DiaWatchManager.HapticSlot.defaults }
-            return slots
+            guard let data = data(forKey: Key.diaWatchPresets.rawValue),
+                  let presets = try? JSONDecoder().decode([DiaWatchManager.Preset].self, from: data)
+            else { return [DiaWatchManager.Preset.defaultPreset] }
+            return presets
         }
         set {
             let data = try? JSONEncoder().encode(newValue)
-            set(data, forKey: Key.diaWatchHapticSlots.rawValue)
+            set(data, forKey: Key.diaWatchPresets.rawValue)
         }
     }
 
-    var diaWatchHapOnReading: Bool {
-        get { bool(forKey: Key.diaWatchHapOnReading.rawValue) }
-        set { set(newValue, forKey: Key.diaWatchHapOnReading.rawValue) }
-    }
-
-    var diaWatchWakeOnReading: Bool {
-        get { bool(forKey: Key.diaWatchWakeOnReading.rawValue) }
-        set { set(newValue, forKey: Key.diaWatchWakeOnReading.rawValue) }
+    var diaWatchActivePresetIndex: Int {
+        get { integer(forKey: Key.diaWatchActivePresetIndex.rawValue) }
+        set { set(newValue, forKey: Key.diaWatchActivePresetIndex.rawValue) }
     }
 
     var favoriteFoods: [StoredFavoriteFood] {

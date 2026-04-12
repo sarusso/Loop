@@ -36,11 +36,27 @@ final class DiaWatchManager: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Preset model
+
+    struct Preset: Codable, Equatable {
+        var name: String
+        var hapOnReading: Bool
+        var wakeOnReading: Bool
+        var hapticSlots: [HapticSlot]
+
+        static let defaultPreset = Preset(
+            name: "default",
+            hapOnReading: false,
+            wakeOnReading: false,
+            hapticSlots: HapticSlot.defaults
+        )
+    }
+
     // MARK: - Published state (drives settings UI)
 
     struct DiscoveredDevice: Identifiable {
         let peripheral: CBPeripheral
-        let rssi: Int          // dBm, e.g. -55
+        let rssi: Int
         var id: UUID { peripheral.identifier }
         var name: String { peripheral.name ?? "Unknown" }
     }
@@ -59,9 +75,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
     @Published var isScanning: Bool = false
     @Published var discoveredDevices: [DiscoveredDevice] = []
     @Published var pushPhase: PushPhase = .idle
-    @Published var hapticSlots: [HapticSlot] = UserDefaults.standard.diaWatchHapticSlots
-    @Published var hapOnReading: Bool = UserDefaults.standard.diaWatchHapOnReading
-    @Published var wakeOnReading: Bool = UserDefaults.standard.diaWatchWakeOnReading
+    @Published var presets: [Preset] = UserDefaults.standard.diaWatchPresets
+    @Published var activePresetIndex: Int = UserDefaults.standard.diaWatchActivePresetIndex
     @Published var bleResponse: String = ""
 
     // MARK: - Private state
@@ -152,40 +167,102 @@ final class DiaWatchManager: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Haptic slot configuration
+    // MARK: - Preset management
 
-    func applyHapticSlots() {
-        guard !isSending else { return }
+    func savePreset(at index: Int) {
+        guard !isSending, index < presets.count else { return }
 
-        UserDefaults.standard.diaWatchHapticSlots = hapticSlots
+        UserDefaults.standard.diaWatchPresets = presets
 
-        // Each slot is sent as its own BLE session so the watch REPL can
-        // finish processing one command before receiving the next.
-        var commands: [(String, (() -> Void)?)] = hapticSlots.enumerated().map { idx, slot in
+        let preset = presets[index]
+        let configMsg = "GB({\"face\":\"diawatch\",\"t\":\"s_c\",\"p\":\(index),\"n\":\"\(preset.name)\",\"hap\":\(preset.hapOnReading ? 1 : 0),\"wake\":\(preset.wakeOnReading ? 1 : 0)})\r\n"
+
+        var commands: [(String, (() -> Void)?)] = [(configMsg, nil)]
+        commands += preset.hapticSlots.enumerated().map { slotIdx, slot -> (String, (() -> Void)?) in
             let msg = slot.enabled
-                ? "GB({\"face\":\"diawatch\",\"t\":\"s_h\",\"idx\":\(idx),\"op\":\"\(slot.op)\",\"thr\":\(slot.thr),\"pat\":\"\(slot.pat)\"})\r\n"
-                : "GB({\"face\":\"diawatch\",\"t\":\"d_h\",\"idx\":\(idx)})\r\n"
+                ? "GB({\"face\":\"diawatch\",\"t\":\"s_h\",\"p\":\(index),\"idx\":\(slotIdx),\"op\":\"\(slot.op)\",\"thr\":\(slot.thr),\"pat\":\"\(slot.pat)\"})\r\n"
+                : "GB({\"face\":\"diawatch\",\"t\":\"d_h\",\"p\":\(index),\"idx\":\(slotIdx)})\r\n"
             return (msg, nil)
         }
 
-        // Attach completion only to the last command
-        let lastIdx = commands.count - 1
-        commands[lastIdx].1 = { [weak self] in
+        commands[commands.count - 1].1 = { [weak self] in
             guard let self else { return }
             if self.receivedResponse {
-                let ok = (self.bleResponse.contains("s_h") || self.bleResponse.contains("d_h"))
-                      && !self.bleResponse.contains("ERROR")
-                self.lastPushError = ok ? nil : "Watch rejected haptic config"
+                self.lastPushError = self.bleResponse.contains("ERROR") ? "Watch rejected preset config" : nil
             } else {
                 self.lastPushError = "No response from watch"
             }
-            self.log.default("DiaWatch haptic config applied")
+            self.log.default("DiaWatch preset %{public}d saved", index)
         }
 
         transmissionQueue = Array(commands.dropFirst())
-        let first = commands[0]
-        log.default("Sending DiaWatch haptic slot 0: %{public}@", first.0)
-        beginTransmission(first.0, onComplete: first.1)
+        log.default("Sending DiaWatch preset %{public}d config", index)
+        beginTransmission(commands[0].0, onComplete: commands[0].1)
+    }
+
+    func addPreset() {
+        let newPreset = Preset(
+            name: "preset \(presets.count)",
+            hapOnReading: false,
+            wakeOnReading: false,
+            hapticSlots: HapticSlot.defaults
+        )
+        presets.append(newPreset)
+        UserDefaults.standard.diaWatchPresets = presets
+    }
+
+    func deleteLastPreset() {
+        guard presets.count > 1, !isSending else { return }
+
+        let lastIdx = presets.count - 1
+        let wasActive = lastIdx == activePresetIndex
+
+        presets.removeLast()
+        if wasActive {
+            activePresetIndex = 0
+            UserDefaults.standard.diaWatchActivePresetIndex = 0
+        }
+        UserDefaults.standard.diaWatchPresets = presets
+
+        let deleteMsg = "GB({\"face\":\"diawatch\",\"t\":\"d_p\",\"p\":\(lastIdx)})\r\n"
+        let deleteCompletion: () -> Void = { [weak self] in
+            guard let self else { return }
+            if self.receivedResponse {
+                self.lastPushError = self.bleResponse.contains("ERROR") ? "Watch rejected preset delete" : nil
+            } else {
+                self.lastPushError = "No response from watch"
+            }
+            self.log.default("DiaWatch preset %{public}d deleted", lastIdx)
+        }
+
+        if wasActive {
+            let activateMsg = "GB({\"face\":\"diawatch\",\"t\":\"a_p\",\"p\":0})\r\n"
+            transmissionQueue = [(deleteMsg, deleteCompletion)]
+            log.default("Switching to preset 0 before deleting preset %{public}d", lastIdx)
+            beginTransmission(activateMsg, onComplete: nil)
+        } else {
+            log.default("Deleting DiaWatch preset %{public}d", lastIdx)
+            beginTransmission(deleteMsg, onComplete: deleteCompletion)
+        }
+    }
+
+    func activatePreset(at index: Int) {
+        guard !isSending, index < presets.count else { return }
+        let message = "GB({\"face\":\"diawatch\",\"t\":\"a_p\",\"p\":\(index)})\r\n"
+        log.default("Activating DiaWatch preset %{public}d", index)
+        beginTransmission(message) { [weak self] in
+            guard let self else { return }
+            if self.receivedResponse {
+                let ok = self.bleResponse.contains("a_p") && !self.bleResponse.contains("ERROR")
+                if ok {
+                    self.activePresetIndex = index
+                    UserDefaults.standard.diaWatchActivePresetIndex = index
+                }
+                self.lastPushError = ok ? nil : "Watch rejected preset activation"
+            } else {
+                self.lastPushError = "No response from watch"
+            }
+        }
     }
 
     // MARK: - Custom command
@@ -215,28 +292,6 @@ final class DiaWatchManager: NSObject, ObservableObject {
                 self.lastPushError = "No response from watch"
             }
             self.log.default("DiaWatch test haptic complete")
-        }
-    }
-
-    // MARK: - Watch config
-
-    func sendConfig() {
-        guard !isSending else { return }
-
-        UserDefaults.standard.diaWatchHapOnReading = hapOnReading
-        UserDefaults.standard.diaWatchWakeOnReading = wakeOnReading
-
-        let message = "GB({\"face\":\"diawatch\",\"t\":\"s_c\",\"hap\":\(hapOnReading ? 1 : 0),\"wake\":\(wakeOnReading ? 1 : 0)})\r\n"
-        log.default("Sending DiaWatch config: %{public}@", message)
-        beginTransmission(message) { [weak self] in
-            guard let self else { return }
-            if self.receivedResponse {
-                let ok = self.bleResponse.contains("s_c") && !self.bleResponse.contains("ERROR")
-                self.lastPushError = ok ? nil : "Watch rejected config"
-            } else {
-                self.lastPushError = "No response from watch"
-            }
-            self.log.default("DiaWatch config applied")
         }
     }
 
@@ -384,11 +439,9 @@ final class DiaWatchManager: NSObject, ObservableObject {
         guard let p = peripheral, let rx = rxCharacteristic else { return }
 
         guard !pendingChunks.isEmpty else {
-            // All chunks sent — cancel send timeout
+            // All chunks sent — cancel send timeout, arm response timer
             cancelSendTimeout()
             pushPhase = .success
-            // Arm response timer: watch has responseInitialTimeout to start responding,
-            // then responseIdleTimeout of silence triggers disconnect.
             armResponseTimer(delay: Self.responseInitialTimeout)
             return
         }
@@ -488,18 +541,13 @@ extension DiaWatchManager: CBCentralManagerDelegate {
             lastPushError = msg
             pushPhase = .idle
         } else if !transmissionQueue.isEmpty {
-            // More commands queued — send the next one without showing success yet
             let next = transmissionQueue.removeFirst()
-            let slotIdx = (hapticSlots.count) - transmissionQueue.count - 1
-            log.default("Sending DiaWatch haptic slot %{public}d: %{public}@", slotIdx, next.message)
+            log.default("Sending DiaWatch queued command")
             beginTransmission(next.message, onComplete: next.onComplete)
         } else {
             onTransmissionComplete?()
             onTransmissionComplete = nil
-            // pushPhase is already .success; fade back to idle after a moment
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-                self?.pushPhase = .idle
-            }
+            pushPhase = .idle
         }
     }
 }
