@@ -76,7 +76,6 @@ final class DiaWatchManager: NSObject, ObservableObject {
     @Published var discoveredDevices: [DiscoveredDevice] = []
     @Published var pushPhase: PushPhase = .idle
     @Published var presets: [Preset] = UserDefaults.standard.diaWatchPresets
-    @Published var activePresetIndex: Int = UserDefaults.standard.diaWatchActivePresetIndex
     @Published var bleResponse: String = ""
 
     // MARK: - Private state
@@ -216,21 +215,16 @@ final class DiaWatchManager: NSObject, ObservableObject {
         guard presets.count > 1, !isSending else { return }
 
         let lastIdx = presets.count - 1
-        let wasActive = lastIdx == activePresetIndex
         let isPersistedToPhone = lastIdx < UserDefaults.standard.diaWatchPresets.count
 
         presets.removeLast()
-        if wasActive {
-            activePresetIndex = 0
-            UserDefaults.standard.diaWatchActivePresetIndex = 0
-        }
         UserDefaults.standard.diaWatchPresets = presets
 
         // If the preset was never saved to the phone, the watch doesn't know about it
         guard isPersistedToPhone else { return }
 
-        let deleteMsg = "GB({\"face\":\"diawatch\",\"t\":\"d_p\",\"p\":\(lastIdx)})\r\n"
-        let deleteCompletion: () -> Void = { [weak self] in
+        log.default("Deleting DiaWatch preset %{public}d", lastIdx)
+        beginTransmission("GB({\"face\":\"diawatch\",\"t\":\"d_p\",\"p\":\(lastIdx)})\r\n") { [weak self] in
             guard let self else { return }
             if self.receivedResponse {
                 self.lastPushError = self.bleResponse.contains("ERROR") ? "Watch rejected preset delete" : nil
@@ -238,16 +232,6 @@ final class DiaWatchManager: NSObject, ObservableObject {
                 self.lastPushError = "No response from watch"
             }
             self.log.default("DiaWatch preset %{public}d deleted", lastIdx)
-        }
-
-        if wasActive {
-            let activateMsg = "GB({\"face\":\"diawatch\",\"t\":\"a_p\",\"p\":0})\r\n"
-            transmissionQueue = [(deleteMsg, deleteCompletion)]
-            log.default("Switching to preset 0 before deleting preset %{public}d", lastIdx)
-            beginTransmission(activateMsg, onComplete: nil)
-        } else {
-            log.default("Deleting DiaWatch preset %{public}d", lastIdx)
-            beginTransmission(deleteMsg, onComplete: deleteCompletion)
         }
     }
 
@@ -258,12 +242,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         beginTransmission(message) { [weak self] in
             guard let self else { return }
             if self.receivedResponse {
-                let ok = self.bleResponse.contains("a_p") && !self.bleResponse.contains("ERROR")
-                if ok {
-                    self.activePresetIndex = index
-                    UserDefaults.standard.diaWatchActivePresetIndex = index
-                }
-                self.lastPushError = ok ? nil : "Watch rejected preset activation"
+                self.lastPushError = self.bleResponse.contains("ERROR") ? "Watch rejected preset activation" : nil
             } else {
                 self.lastPushError = "No response from watch"
             }

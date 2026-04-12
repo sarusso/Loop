@@ -280,8 +280,7 @@ struct DiaWatchSettingsView: View {
                 }
             )) {
                 ForEach(manager.presets.indices, id: \.self) { idx in
-                    Text(manager.presets[idx].name + (idx == manager.activePresetIndex ? " (active)" : ""))
-                        .tag(idx)
+                    Text(manager.presets[idx].name).tag(idx)
                 }
             }
             .pickerStyle(.menu)
@@ -315,8 +314,7 @@ struct DiaWatchSettingsView: View {
                 label: "Activate",
                 id: .activatePreset,
                 dirty: false,
-                status: activatePresetStatus,
-                disabled: selectedPresetIndex == manager.activePresetIndex
+                status: activatePresetStatus
             ) {
                 activeButton = .activatePreset
                 manager.activatePreset(at: selectedPresetIndex)

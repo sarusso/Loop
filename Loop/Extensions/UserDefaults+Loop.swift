@@ -20,7 +20,6 @@ extension UserDefaults {
         case diaWatchPeripheralID = "com.loopkit.Loop.DiaWatch.peripheralID"
         case diaWatchDeviceName = "com.loopkit.Loop.DiaWatch.deviceName"
         case diaWatchPresets = "com.loopkit.Loop.DiaWatch.presets"
-        case diaWatchActivePresetIndex = "com.loopkit.Loop.DiaWatch.activePresetIndex"
     }
 
     var legacyPumpManagerRawValue: PumpManager.RawValue? {
@@ -119,11 +118,6 @@ extension UserDefaults {
             let data = try? JSONEncoder().encode(newValue)
             set(data, forKey: Key.diaWatchPresets.rawValue)
         }
-    }
-
-    var diaWatchActivePresetIndex: Int {
-        get { integer(forKey: Key.diaWatchActivePresetIndex.rawValue) }
-        set { set(newValue, forKey: Key.diaWatchActivePresetIndex.rawValue) }
     }
 
     var favoriteFoods: [StoredFavoriteFood] {
