@@ -16,7 +16,7 @@ struct DiaWatchSettingsView: View {
     @State private var selectedPresetIndex: Int = 0
     @State private var presetDirty = false
 
-    private enum ActiveButton { case none, test, savePreset, activatePreset, deletePreset, testHaptic, customCommand, getLog, getPrevLog }
+    private enum ActiveButton { case none, test, savePreset, activatePreset, deletePreset, testHaptic, customCommand, getLog, getPrevLog, setTime, battery }
     @State private var activeButton: ActiveButton = .none
 
     struct ButtonStatus {
@@ -37,6 +37,8 @@ struct DiaWatchSettingsView: View {
     @State private var customCommandText: String = ""
     @State private var getLogStatus: ButtonStatus? = nil
     @State private var getPrevLogStatus: ButtonStatus? = nil
+    @State private var setTimeStatus: ButtonStatus? = nil
+    @State private var batteryStatus: ButtonStatus? = nil
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -119,6 +121,8 @@ struct DiaWatchSettingsView: View {
             case .customCommand: text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
             case .getLog:        text = isError ? (manager.lastPushError ?? "Failed") : "Done!"
             case .getPrevLog:    text = isError ? (manager.lastPushError ?? "Failed") : "Done!"
+            case .setTime:       text = isError ? (manager.lastPushError ?? "Failed") : "Set!"
+            case .battery:       text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
             case .none:          return
             }
 
@@ -148,6 +152,12 @@ struct DiaWatchSettingsView: View {
             case .getPrevLog:
                 getPrevLogStatus = status
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { getPrevLogStatus = nil }
+            case .setTime:
+                setTimeStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { setTimeStatus = nil }
+            case .battery:
+                batteryStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { batteryStatus = nil }
             case .none: break
             }
         }
@@ -207,6 +217,28 @@ struct DiaWatchSettingsView: View {
             } else {
                 Button(manager.pairedDeviceName != nil ? "Scan for different device" : "Scan for device") {
                     manager.startScan()
+                }
+                actionRow(
+                    label: "Set time",
+                    id: .setTime,
+                    dirty: false,
+                    status: setTimeStatus
+                ) {
+                    activeButton = .setTime
+                    let now = Date()
+                    var cal = Calendar(identifier: .gregorian)
+                    cal.timeZone = TimeZone.current
+                    let y  = cal.component(.year,   from: now)
+                    let mo = cal.component(.month,  from: now)
+                    let d  = cal.component(.day,    from: now)
+                    let h  = cal.component(.hour,   from: now)
+                    let mi = cal.component(.minute, from: now)
+                    let s  = cal.component(.second, from: now)
+                    let mpWday = (cal.component(.weekday, from: now) + 5) % 7
+                    let yday = cal.ordinality(of: .day, in: .year, for: now) ?? 1
+                    manager.sendCustomCommand(
+                        "import wasp;wasp.watch.rtc.set_localtime((\(y),\(mo),\(d),\(h),\(mi),\(s),\(mpWday),\(yday)))"
+                    )
                 }
             }
 
@@ -449,6 +481,16 @@ struct DiaWatchSettingsView: View {
             ) {
                 activeButton = .getPrevLog
                 manager.sendCustomCommand("import wasp; wasp.log_pre_dump()")
+            }
+
+            actionRow(
+                label: "Get battery",
+                id: .battery,
+                dirty: false,
+                status: batteryStatus
+            ) {
+                activeButton = .battery
+                manager.sendCustomCommand("import wasp;watch.battery.level()")
             }
 
             VStack(alignment: .leading, spacing: 4) {
