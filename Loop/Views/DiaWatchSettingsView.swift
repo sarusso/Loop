@@ -16,7 +16,7 @@ struct DiaWatchSettingsView: View {
     @State private var selectedPresetIndex: Int = 0
     @State private var presetDirty = false
 
-    private enum ActiveButton { case none, test, savePreset, activatePreset, deletePreset, testHaptic, customCommand, getLog }
+    private enum ActiveButton { case none, test, savePreset, activatePreset, deletePreset, testHaptic, customCommand, getLog, getPrevLog }
     @State private var activeButton: ActiveButton = .none
 
     struct ButtonStatus {
@@ -36,6 +36,7 @@ struct DiaWatchSettingsView: View {
     @State private var customCommandStatus: ButtonStatus? = nil
     @State private var customCommandText: String = ""
     @State private var getLogStatus: ButtonStatus? = nil
+    @State private var getPrevLogStatus: ButtonStatus? = nil
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -117,6 +118,7 @@ struct DiaWatchSettingsView: View {
             case .testHaptic:    text = isError ? (manager.lastPushError ?? "Failed") : "Played!"
             case .customCommand: text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
             case .getLog:        text = isError ? (manager.lastPushError ?? "Failed") : "Done!"
+            case .getPrevLog:    text = isError ? (manager.lastPushError ?? "Failed") : "Done!"
             case .none:          return
             }
 
@@ -143,6 +145,9 @@ struct DiaWatchSettingsView: View {
             case .getLog:
                 getLogStatus = status
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { getLogStatus = nil }
+            case .getPrevLog:
+                getPrevLogStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { getPrevLogStatus = nil }
             case .none: break
             }
         }
@@ -434,6 +439,16 @@ struct DiaWatchSettingsView: View {
             ) {
                 activeButton = .getLog
                 manager.sendCustomCommand("import wasp; wasp.log_dump()")
+            }
+
+            actionRow(
+                label: "Get prev log",
+                id: .getPrevLog,
+                dirty: false,
+                status: getPrevLogStatus
+            ) {
+                activeButton = .getPrevLog
+                manager.sendCustomCommand("import wasp; wasp.log_pre_dump()")
             }
 
             VStack(alignment: .leading, spacing: 4) {
