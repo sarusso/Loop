@@ -66,6 +66,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         case connecting
         case sending
         case success
+        case purging
     }
 
     @Published var pairedDeviceName: String?
@@ -77,6 +78,9 @@ final class DiaWatchManager: NSObject, ObservableObject {
     @Published var pushPhase: PushPhase = .idle
     @Published var presets: [Preset] = UserDefaults.standard.diaWatchPresets
     @Published var bleResponse: String = ""
+    @Published var transmissionsEnabled: Bool = true {
+        didSet { if !transmissionsEnabled { transmissionQueue = [] } }
+    }
 
     // MARK: - Private state
 
@@ -99,6 +103,11 @@ final class DiaWatchManager: NSObject, ObservableObject {
     private static let responseIdleTimeout: TimeInterval = 1.5    // disconnect after this much silence
     private var pendingCommandEcho: String?   // command text the REPL will echo back (no \r\n)
     private var echoDetected = false          // true once pendingCommandEcho seen in TX stream
+    private var currentTransmissionMessage: String = ""
+    private var purgeTimer: Timer?
+    private var pendingRetryMessage: String?
+    private var pendingRetryCompletion: (() -> Void)?
+    private var isRetryAttempt = false   // true during the \x03\x03 retry; no further purge on failure
 
     private weak var deviceManager: DeviceDataManager?
     private let log = DiagnosticLog(category: "DiaWatchManager")
@@ -136,7 +145,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
     // MARK: - Push (glucose reading)
 
     func push() {
-        guard !isSending, UserDefaults.standard.diaWatchPeripheralID != nil else { return }
+        guard transmissionsEnabled, UserDefaults.standard.diaWatchPeripheralID != nil else { return }
         guard let dm = deviceManager, let sample = dm.glucoseStore.latestGlucose else { return }
 
         let mgdl = Int(sample.quantity.doubleValue(for: .milligramsPerDeciliter))
@@ -257,9 +266,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         log.default("Sending DiaWatch custom command: %{public}@", text)
         beginTransmission(message) { [weak self] in
             guard let self else { return }
-            if !self.receivedResponse {
-                self.lastPushError = "No response from watch"
-            }
+            self.lastPushError = self.receivedResponse ? nil : "No response from watch"
             self.log.default("DiaWatch custom command complete")
         }
     }
@@ -272,17 +279,20 @@ final class DiaWatchManager: NSObject, ObservableObject {
         log.default("Sending DiaWatch test haptic: %{public}@", name)
         beginTransmission(message) { [weak self] in
             guard let self else { return }
-            if !self.receivedResponse {
-                self.lastPushError = "No response from watch"
-            }
+            self.lastPushError = self.receivedResponse ? nil : "No response from watch"
             self.log.default("DiaWatch test haptic complete")
         }
     }
 
     // MARK: - Base transmission
 
-    private func beginTransmission(_ message: String, onComplete: (() -> Void)? = nil) {
-        guard !isSending else { return }
+    private func beginTransmission(_ message: String, onComplete: (() -> Void)? = nil, withPreamble: Bool = false) {
+        guard !isSending else {
+            if transmissionsEnabled {
+                transmissionQueue.append((message: message, onComplete: onComplete))
+            }
+            return
+        }
 
         guard UserDefaults.standard.diaWatchPeripheralID != nil else {
             simulateNoDevice()
@@ -291,11 +301,12 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
         guard let msgData = message.data(using: .utf8) else { return }
 
-        // Prepend \x03\x03 (double Ctrl+C) to clear any stuck REPL state.
-        // Store the clean command text so we can detect its echo in the TX stream.
+        currentTransmissionMessage = message
         pendingCommandEcho = message.trimmingCharacters(in: .whitespacesAndNewlines)
         echoDetected = false
-        let data = Data([0x03, 0x03]) + msgData
+        // withPreamble = true only on purge retry — prepends \x03\x03 to clear a stuck REPL.
+        // On first attempt we skip the preamble: it can freeze the watch during boot.
+        let data = withPreamble ? Data([0x03, 0x03]) + msgData : msgData
         pendingChunks = stride(from: 0, to: data.count, by: 20).map {
             Data(data[$0 ..< min($0 + 20, data.count)])
         }
@@ -350,6 +361,33 @@ final class DiaWatchManager: NSObject, ObservableObject {
         responseTimer = nil
     }
 
+    private func cancelPurgeTimer() {
+        purgeTimer?.invalidate()
+        purgeTimer = nil
+        pendingRetryMessage = nil
+        pendingRetryCompletion = nil
+    }
+
+    private func enterPurge(message: String, onComplete: (() -> Void)?) {
+        log.default("DiaWatch no echo — entering purge, retrying in 30 s")
+        pushPhase = .purging
+        isSending = true   // keeps queue accepting new items via beginTransmission guard
+        pendingRetryMessage = message
+        pendingRetryCompletion = onComplete
+        purgeTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            self.purgeTimer = nil
+            guard let msg = self.pendingRetryMessage else { return }
+            let completion = self.pendingRetryCompletion
+            self.pendingRetryMessage = nil
+            self.pendingRetryCompletion = nil
+            self.isSending = false  // let beginTransmission proceed
+            self.isRetryAttempt = true
+            self.log.default("DiaWatch purge complete — retrying with \\x03\\x03 preamble")
+            self.beginTransmission(msg, onComplete: completion, withPreamble: true)
+        }
+    }
+
     private func abortSend(error: String) {
         cancelSendTimeout()
         cancelResponseTimer()
@@ -361,6 +399,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
         transmissionQueue = []
         pendingCommandEcho = nil
         echoDetected = false
+        isRetryAttempt = false
+        cancelPurgeTimer()
         lastPushError = error
         pushPhase = .idle
     }
@@ -414,6 +454,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         isSending = false
         pendingChunks = []
         onTransmissionComplete = nil
+        cancelPurgeTimer()
         UserDefaults.standard.diaWatchPeripheralID = nil
         UserDefaults.standard.diaWatchDeviceName = nil
         pairedDeviceName = nil
@@ -536,12 +577,20 @@ extension DiaWatchManager: CBCentralManagerDelegate {
             log.default("Sending DiaWatch queued command")
             beginTransmission(next.message, onComplete: next.onComplete)
         } else {
-            onTransmissionComplete?()
-            onTransmissionComplete = nil
-            if !echoDetected {
-                lastPushError = "No echo from watch"
+            if !echoDetected && !isRetryAttempt {
+                // First attempt got no echo — could be a boot. Purge and retry with \x03\x03.
+                let retryMsg = currentTransmissionMessage
+                let retryCompletion = onTransmissionComplete
+                onTransmissionComplete = nil
+                transmissionQueue = []  // queue is re-filled during purge wait
+                enterPurge(message: retryMsg, onComplete: retryCompletion)
+            } else {
+                isRetryAttempt = false
+                if !echoDetected { lastPushError = "No echo from watch" }
+                onTransmissionComplete?()
+                onTransmissionComplete = nil
+                pushPhase = .idle
             }
-            pushPhase = .idle
         }
     }
 }

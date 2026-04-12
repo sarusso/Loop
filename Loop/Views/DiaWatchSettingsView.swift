@@ -257,6 +257,41 @@ struct DiaWatchSettingsView: View {
             } else if manager.pairedDeviceName != nil {
                 Text("No readings sent yet").foregroundColor(.secondary)
             }
+
+            Toggle("Enable transmissions", isOn: $manager.transmissionsEnabled)
+
+            pushStatusRow
+        }
+    }
+
+    @ViewBuilder
+    private var pushStatusRow: some View {
+        switch manager.pushPhase {
+        case .connecting:
+            HStack(spacing: 5) {
+                ProgressView().scaleEffect(0.75)
+                Text("Connecting…").font(.caption).foregroundColor(.secondary)
+            }
+        case .sending:
+            HStack(spacing: 5) {
+                ProgressView().scaleEffect(0.75)
+                Text("Sending…").font(.caption).foregroundColor(.secondary)
+            }
+        case .purging:
+            HStack(spacing: 5) {
+                ProgressView().scaleEffect(0.75)
+                Text("Purging — retrying in ~30 s…").font(.caption).foregroundColor(.secondary)
+            }
+        case .success:
+            EmptyView()
+        case .idle:
+            if let error = manager.lastPushError {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.caption).foregroundColor(.orange)
+                    Text(error).font(.caption).foregroundColor(.orange)
+                }
+            }
         }
     }
 
