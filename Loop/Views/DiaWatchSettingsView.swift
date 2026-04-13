@@ -553,7 +553,7 @@ struct DiaWatchSettingsView: View {
                 status: uptimeStatus
             ) {
                 activeButton = .uptime
-                manager.sendCustomCommand("import wasp;wasp.system.ticks/3600")
+                manager.sendCustomCommand("import wasp;wasp.uptime()/3600")
             }
 
             VStack(alignment: .leading, spacing: 4) {
