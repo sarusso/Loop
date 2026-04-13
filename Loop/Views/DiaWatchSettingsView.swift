@@ -16,7 +16,7 @@ struct DiaWatchSettingsView: View {
     @State private var selectedPresetIndex: Int = 0
     @State private var presetDirty = false
 
-    private enum ActiveButton { case none, test, savePreset, activatePreset, deletePreset, testHaptic, customCommand, getLog, getPrevLog, setTime, battery, freeMem, uptime }
+    private enum ActiveButton { case none, test, savePreset, activatePreset, deletePreset, testHaptic, customCommand, setTime, battery, freeMem, uptime }
     @State private var activeButton: ActiveButton = .none
 
     struct ButtonStatus {
@@ -35,8 +35,6 @@ struct DiaWatchSettingsView: View {
     @State private var selectedHapticPattern: String = DiaWatchManager.HapticSlot.allPatterns[0]
     @State private var customCommandStatus: ButtonStatus? = nil
     @State private var customCommandText: String = ""
-    @State private var getLogStatus: ButtonStatus? = nil
-    @State private var getPrevLogStatus: ButtonStatus? = nil
     @State private var setTimeStatus: ButtonStatus? = nil
     @State private var batteryStatus: ButtonStatus? = nil
     @State private var freeMemStatus: ButtonStatus? = nil
@@ -121,8 +119,6 @@ struct DiaWatchSettingsView: View {
             case .deletePreset:   text = isError ? (manager.lastPushError ?? "Failed") : "Deleted!"
             case .testHaptic:    text = isError ? (manager.lastPushError ?? "Failed") : "Played!"
             case .customCommand: text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
-            case .getLog:        text = isError ? (manager.lastPushError ?? "Failed") : "Done!"
-            case .getPrevLog:    text = isError ? (manager.lastPushError ?? "Failed") : "Done!"
             case .setTime:       text = isError ? (manager.lastPushError ?? "Failed") : "Set!"
             case .battery:       text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
             case .freeMem:       text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
@@ -150,12 +146,6 @@ struct DiaWatchSettingsView: View {
             case .customCommand:
                 customCommandStatus = status
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { customCommandStatus = nil }
-            case .getLog:
-                getLogStatus = status
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { getLogStatus = nil }
-            case .getPrevLog:
-                getPrevLogStatus = status
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { getPrevLogStatus = nil }
             case .setTime:
                 setTimeStatus = status
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { setTimeStatus = nil }
@@ -489,43 +479,6 @@ struct DiaWatchSettingsView: View {
                 manager.pushTest(mgdl: testMgdl)
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                TextField("Custom command", text: $customCommandText)
-                    .font(.system(.body, design: .monospaced))
-                    .autocapitalization(.none)
-                    .disableAutocorrection(true)
-                actionRow(
-                    label: "Send",
-                    id: .customCommand,
-                    dirty: false,
-                    status: customCommandStatus
-                ) {
-                    activeButton = .customCommand
-                    manager.sendCustomCommand(customCommandText)
-                }
-            }
-            .padding(.vertical, 2)
-
-            actionRow(
-                label: "Get log",
-                id: .getLog,
-                dirty: false,
-                status: getLogStatus
-            ) {
-                activeButton = .getLog
-                manager.sendCustomCommand("import wasp; wasp.log_dump()")
-            }
-
-            actionRow(
-                label: "Get prev log",
-                id: .getPrevLog,
-                dirty: false,
-                status: getPrevLogStatus
-            ) {
-                activeButton = .getPrevLog
-                manager.sendCustomCommand("import wasp; wasp.log_pre_dump()")
-            }
-
             actionRow(
                 label: "Get battery",
                 id: .battery,
@@ -555,6 +508,23 @@ struct DiaWatchSettingsView: View {
                 activeButton = .uptime
                 manager.sendCustomCommand("import wasp;wasp.uptime()/3600")
             }
+
+            VStack(alignment: .leading, spacing: 6) {
+                TextField("Custom command", text: $customCommandText)
+                    .font(.system(.body, design: .monospaced))
+                    .autocapitalization(.none)
+                    .disableAutocorrection(true)
+                actionRow(
+                    label: "Send",
+                    id: .customCommand,
+                    dirty: false,
+                    status: customCommandStatus
+                ) {
+                    activeButton = .customCommand
+                    manager.sendCustomCommand(customCommandText)
+                }
+            }
+            .padding(.vertical, 2)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Last transmission response")
