@@ -212,7 +212,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
     func addPreset() {
         let newPreset = Preset(
-            name: "preset \(presets.count)",
+            name: "Mode \(presets.count)",
             hapOnReading: false,
             wakeOnReading: false,
             hapticSlots: HapticSlot.defaults

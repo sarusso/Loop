@@ -102,7 +102,7 @@ struct DiaWatchSettingsView: View {
                 pendingAddPreset = false
             }
         } message: {
-            Text("The preset \"\(manager.presets[selectedPresetIndex].name)\" has unsaved changes. Discard them?")
+            Text("The mode \"\(manager.presets[selectedPresetIndex].name)\" has unsaved changes. Discard them?")
         }
         .onChange(of: manager.pushPhase) { phase in
             guard phase == .idle else { return }
@@ -300,9 +300,9 @@ struct DiaWatchSettingsView: View {
     private var configurationSection: some View {
         Section(
             header: Text("Configuration"),
-            footer: Text("Tap Save to push the selected preset to the watch. Tap Activate to make it the active preset.")
+            footer: Text("Tap Save to push the selected mode to the watch. Tap Activate to make it the active mode.")
         ) {
-            Picker("Preset", selection: Binding(
+            Picker("Mode", selection: Binding(
                 get: { selectedPresetIndex },
                 set: { newIdx in
                     guard newIdx != selectedPresetIndex else { return }
@@ -323,7 +323,7 @@ struct DiaWatchSettingsView: View {
             HStack {
                 Text("Name")
                 Spacer()
-                TextField("preset name", text: Binding(
+                TextField("mode name", text: Binding(
                     get: { manager.presets[selectedPresetIndex].name },
                     set: { manager.presets[selectedPresetIndex].name = $0 }
                 ))
@@ -367,7 +367,7 @@ struct DiaWatchSettingsView: View {
             }
 
             actionRow(
-                label: "Delete preset",
+                label: "Delete mode",
                 id: .deletePreset,
                 dirty: false,
                 status: deletePresetStatus,
@@ -379,7 +379,7 @@ struct DiaWatchSettingsView: View {
                 selectedPresetIndex = max(0, selectedPresetIndex - 1)
             }
 
-            Button("Add preset") {
+            Button("Add mode") {
                 if presetDirty {
                     pendingAddPreset = true
                     showUnsavedChangesAlert = true
