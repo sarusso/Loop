@@ -16,7 +16,7 @@ struct DiaWatchSettingsView: View {
     @State private var selectedPresetIndex: Int = 0
     @State private var presetDirty = false
 
-    private enum ActiveButton { case none, test, savePreset, activatePreset, deletePreset, testHaptic, customCommand, getLog, getPrevLog, setTime, battery }
+    private enum ActiveButton { case none, test, savePreset, activatePreset, deletePreset, testHaptic, customCommand, getLog, getPrevLog, setTime, battery, freeMem, uptime }
     @State private var activeButton: ActiveButton = .none
 
     struct ButtonStatus {
@@ -39,6 +39,8 @@ struct DiaWatchSettingsView: View {
     @State private var getPrevLogStatus: ButtonStatus? = nil
     @State private var setTimeStatus: ButtonStatus? = nil
     @State private var batteryStatus: ButtonStatus? = nil
+    @State private var freeMemStatus: ButtonStatus? = nil
+    @State private var uptimeStatus: ButtonStatus? = nil
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -123,6 +125,8 @@ struct DiaWatchSettingsView: View {
             case .getPrevLog:    text = isError ? (manager.lastPushError ?? "Failed") : "Done!"
             case .setTime:       text = isError ? (manager.lastPushError ?? "Failed") : "Set!"
             case .battery:       text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
+            case .freeMem:       text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
+            case .uptime:        text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
             case .none:          return
             }
 
@@ -158,6 +162,12 @@ struct DiaWatchSettingsView: View {
             case .battery:
                 batteryStatus = status
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { batteryStatus = nil }
+            case .freeMem:
+                freeMemStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { freeMemStatus = nil }
+            case .uptime:
+                uptimeStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { uptimeStatus = nil }
             case .none: break
             }
         }
@@ -524,6 +534,26 @@ struct DiaWatchSettingsView: View {
             ) {
                 activeButton = .battery
                 manager.sendCustomCommand("import wasp;watch.battery.level()")
+            }
+
+            actionRow(
+                label: "Get free mem",
+                id: .freeMem,
+                dirty: false,
+                status: freeMemStatus
+            ) {
+                activeButton = .freeMem
+                manager.sendCustomCommand("import gc;gc.mem_free()")
+            }
+
+            actionRow(
+                label: "Get uptime",
+                id: .uptime,
+                dirty: false,
+                status: uptimeStatus
+            ) {
+                activeButton = .uptime
+                manager.sendCustomCommand("import wasp;wasp.system.ticks/3600")
             }
 
             VStack(alignment: .leading, spacing: 4) {
