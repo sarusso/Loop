@@ -202,7 +202,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
     // MARK: - Preset management
 
-    func savePreset(at index: Int) {
+    func saveGeneralConfig(at index: Int) {
         guard !isSending, index < presets.count else { return }
 
         UserDefaults.standard.diaWatchPresets = presets
@@ -210,8 +210,25 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let preset = presets[index]
         let configMsg = "GB({\"face\":\"diawatch\",\"t\":\"s_c\",\"p\":\(index),\"n\":\"\(preset.name)\",\"hap\":\(preset.hapOnReading ? 1 : 0),\"wake\":\(preset.wakeOnReading ? 1 : 0),\"od\":\(preset.od),\"nd\":\(preset.nd)})\r\n"
 
-        var commands: [(String, (() -> Void)?)] = [(configMsg, nil)]
-        commands += preset.hapticSlots.enumerated().map { slotIdx, slot -> (String, (() -> Void)?) in
+        log.default("Sending DiaWatch mode %{public}d general config", index)
+        beginTransmission(configMsg) { [weak self] in
+            guard let self else { return }
+            if self.receivedResponse {
+                self.lastPushError = self.bleResponse.contains("ERROR") ? "Watch rejected mode config" : nil
+            } else {
+                self.lastPushError = "No response from watch"
+            }
+            self.log.default("DiaWatch mode %{public}d general config saved", index)
+        }
+    }
+
+    func saveSlots(at index: Int) {
+        guard !isSending, index < presets.count else { return }
+
+        UserDefaults.standard.diaWatchPresets = presets
+
+        let preset = presets[index]
+        var commands: [(String, (() -> Void)?)] = preset.hapticSlots.enumerated().map { slotIdx, slot in
             let msg = slot.enabled
                 ? "GB({\"face\":\"diawatch\",\"t\":\"s_h\",\"p\":\(index),\"idx\":\(slotIdx),\"op\":\"\(slot.op)\",\"thr\":\(slot.thr),\"pat\":\"\(slot.pat)\"})\r\n"
                 : "GB({\"face\":\"diawatch\",\"t\":\"d_h\",\"p\":\(index),\"idx\":\(slotIdx)})\r\n"
@@ -221,15 +238,15 @@ final class DiaWatchManager: NSObject, ObservableObject {
         commands[commands.count - 1].1 = { [weak self] in
             guard let self else { return }
             if self.receivedResponse {
-                self.lastPushError = self.bleResponse.contains("ERROR") ? "Watch rejected preset config" : nil
+                self.lastPushError = self.bleResponse.contains("ERROR") ? "Watch rejected slot config" : nil
             } else {
                 self.lastPushError = "No response from watch"
             }
-            self.log.default("DiaWatch preset %{public}d saved", index)
+            self.log.default("DiaWatch mode %{public}d slots saved", index)
         }
 
         transmissionQueue = Array(commands.dropFirst())
-        log.default("Sending DiaWatch preset %{public}d config", index)
+        log.default("Sending DiaWatch mode %{public}d slots", index)
         beginTransmission(commands[0].0, onComplete: commands[0].1)
     }
 

@@ -16,20 +16,30 @@ struct DiaWatchSettingsView: View {
     @State private var selectedPresetIndex: Int = 0
     @State private var presetDirty = false
 
-    private enum ActiveButton { case none, test, savePreset, activatePreset, deletePreset, testHaptic, customCommand, setTime, battery, freeMem, uptime }
+    private enum ConfigTab: String, CaseIterable { case general = "General", slots = "Slots" }
+    @State private var configTab: ConfigTab = .general
+    @State private var generalDirty = false
+    @State private var slotsDirty = false
+
+    private enum ActiveButton { case none, test, saveGeneral, saveSlots, activatePreset, deletePreset, testHaptic, customCommand, setTime, battery, freeMem, uptime }
     @State private var activeButton: ActiveButton = .none
 
     struct ButtonStatus {
         var text: String
         var isError: Bool
     }
-    @State private var savePresetStatus: ButtonStatus? = nil
+    @State private var saveGeneralStatus: ButtonStatus? = nil
+    @State private var saveSlotsStatus: ButtonStatus? = nil
     @State private var activatePresetStatus: ButtonStatus? = nil
     @State private var deletePresetStatus: ButtonStatus? = nil
     @State private var showUnsavedChangesAlert = false
+    @State private var showTabChangeAlert = false
+    @State private var showNewModeSaveAlert = false
+    @State private var pendingTabSwitch: ConfigTab? = nil
     @State private var pendingPresetSwitch: Int = 0
     @State private var pendingDismiss = false
     @State private var pendingAddPreset = false
+    @State private var suppressDirty = false
     @State private var testStatus: ButtonStatus? = nil
     @State private var testHapticStatus: ButtonStatus? = nil
     @State private var selectedHapticPattern: String = DiaWatchManager.HapticSlot.allPatterns[0]
@@ -59,10 +69,10 @@ struct DiaWatchSettingsView: View {
             debugSection
         }
         .navigationBarTitle("DiaWatch", displayMode: .inline)
-        .navigationBarBackButtonHidden(presetDirty)
+        .navigationBarBackButtonHidden(anyDirty)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                if presetDirty {
+                if anyDirty {
                     Button {
                         pendingDismiss = true
                         showUnsavedChangesAlert = true
@@ -75,9 +85,25 @@ struct DiaWatchSettingsView: View {
                 }
             }
         }
-        .onChange(of: manager.presets) { _ in presetDirty = true }
+        .onChange(of: manager.presets) { _ in
+            if suppressDirty { suppressDirty = false; return }
+            let savedPresets = UserDefaults.standard.diaWatchPresets
+            guard selectedPresetIndex < savedPresets.count else {
+                generalDirty = true
+                return
+            }
+            let saved = savedPresets[selectedPresetIndex]
+            let current = manager.presets[selectedPresetIndex]
+            generalDirty = current.name != saved.name
+                || current.hapOnReading != saved.hapOnReading
+                || current.wakeOnReading != saved.wakeOnReading
+                || current.od != saved.od
+                || current.nd != saved.nd
+            slotsDirty = current.hapticSlots != saved.hapticSlots
+        }
         .alert("Unsaved Changes", isPresented: $showUnsavedChangesAlert) {
             Button("Discard", role: .destructive) {
+                suppressDirty = true
                 let savedPresets = UserDefaults.standard.diaWatchPresets
                 if selectedPresetIndex < savedPresets.count {
                     manager.presets[selectedPresetIndex] = savedPresets[selectedPresetIndex]
@@ -85,7 +111,8 @@ struct DiaWatchSettingsView: View {
                     manager.presets.removeLast()
                     selectedPresetIndex = max(0, manager.presets.count - 1)
                 }
-                presetDirty = false
+                generalDirty = false
+                slotsDirty = false
                 if pendingDismiss {
                     pendingDismiss = false
                     dismiss()
@@ -93,7 +120,8 @@ struct DiaWatchSettingsView: View {
                     pendingAddPreset = false
                     manager.addPreset()
                     selectedPresetIndex = manager.presets.count - 1
-                    presetDirty = true
+                    configTab = .general
+                    generalDirty = true
                 } else {
                     selectedPresetIndex = min(pendingPresetSwitch, manager.presets.count - 1)
                 }
@@ -105,6 +133,45 @@ struct DiaWatchSettingsView: View {
         } message: {
             Text("The mode \"\(manager.presets[selectedPresetIndex].name)\" has unsaved changes. Discard them?")
         }
+        .alert("Unsaved Changes", isPresented: $showTabChangeAlert) {
+            Button("Save", role: .none) {
+                if let tab = pendingTabSwitch {
+                    if configTab == .general {
+                        activeButton = .saveGeneral
+                        manager.saveGeneralConfig(at: selectedPresetIndex)
+                    } else {
+                        activeButton = .saveSlots
+                        manager.saveSlots(at: selectedPresetIndex)
+                    }
+                    configTab = tab
+                    pendingTabSwitch = nil
+                }
+            }
+            Button("Discard", role: .destructive) {
+                if let tab = pendingTabSwitch {
+                    suppressDirty = true
+                    let savedPresets = UserDefaults.standard.diaWatchPresets
+                    if selectedPresetIndex < savedPresets.count {
+                        manager.presets[selectedPresetIndex] = savedPresets[selectedPresetIndex]
+                    }
+                    if configTab == .general { generalDirty = false } else { slotsDirty = false }
+                    configTab = tab
+                    pendingTabSwitch = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingTabSwitch = nil
+            }
+        } message: {
+            Text("Save changes to \(configTab.rawValue.lowercased()) before switching?")
+        }
+        .alert("Save Required", isPresented: $showNewModeSaveAlert) {
+            Button("OK", role: .cancel) {
+                pendingTabSwitch = nil
+            }
+        } message: {
+            Text("Save this new mode before switching tabs.")
+        }
         .onChange(of: manager.pushPhase) { phase in
             guard phase == .idle else { return }
 
@@ -115,7 +182,8 @@ struct DiaWatchSettingsView: View {
             let text: String
             switch which {
             case .test:          text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
-            case .savePreset:    text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
+            case .saveGeneral:   text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
+            case .saveSlots:     text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
             case .activatePreset: text = isError ? (manager.lastPushError ?? "Failed") : "Activated!"
             case .deletePreset:   text = isError ? (manager.lastPushError ?? "Failed") : "Deleted!"
             case .testHaptic:    text = isError ? (manager.lastPushError ?? "Failed") : "Played!"
@@ -132,9 +200,14 @@ struct DiaWatchSettingsView: View {
             case .test:
                 testStatus = status
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { testStatus = nil }
-            case .savePreset:
-                savePresetStatus = status
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { savePresetStatus = nil }
+            case .saveGeneral:
+                saveGeneralStatus = status
+                if !isError { generalDirty = false }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { saveGeneralStatus = nil }
+            case .saveSlots:
+                saveSlotsStatus = status
+                if !isError { slotsDirty = false }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { saveSlotsStatus = nil }
             case .activatePreset:
                 activatePresetStatus = status
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { activatePresetStatus = nil }
@@ -298,72 +371,47 @@ struct DiaWatchSettingsView: View {
 
     // MARK: - Configuration
 
+    private var anyDirty: Bool { generalDirty || slotsDirty }
+    private var currentTabDirty: Bool { configTab == .general ? generalDirty : slotsDirty }
+
     private var configurationSection: some View {
-        Section(
-            header: Text("Configuration"),
-            footer: Text("Tap Save to push the selected mode to the watch. Tap Activate to make it the active mode.")
-        ) {
-            Picker("Mode", selection: Binding(
-                get: { selectedPresetIndex },
-                set: { newIdx in
-                    guard newIdx != selectedPresetIndex else { return }
-                    if presetDirty {
-                        pendingPresetSwitch = newIdx
-                        showUnsavedChangesAlert = true
-                    } else {
-                        selectedPresetIndex = newIdx
+        Section(header: Text("Modes")) {
+            HStack {
+                Picker("", selection: Binding(
+                    get: { selectedPresetIndex },
+                    set: { newIdx in
+                        guard newIdx != selectedPresetIndex else { return }
+                        if anyDirty {
+                            pendingPresetSwitch = newIdx
+                            showUnsavedChangesAlert = true
+                        } else {
+                            selectedPresetIndex = newIdx
+                        }
+                    }
+                )) {
+                    ForEach(manager.presets.indices, id: \.self) { idx in
+                        Text(manager.presets[idx].name).tag(idx)
                     }
                 }
-            )) {
-                ForEach(manager.presets.indices, id: \.self) { idx in
-                    Text(manager.presets[idx].name).tag(idx)
-                }
-            }
-            .pickerStyle(.menu)
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .padding(.leading, -12)
 
-            HStack {
-                Text("Name")
                 Spacer()
-                TextField("mode name", text: Binding(
-                    get: { manager.presets[selectedPresetIndex].name },
-                    set: { manager.presets[selectedPresetIndex].name = $0 }
-                ))
-                .multilineTextAlignment(.trailing)
-                .foregroundColor(.secondary)
-            }
 
-            Toggle("Wake screen on new reading", isOn: Binding(
-                get: { manager.presets[selectedPresetIndex].wakeOnReading },
-                set: { manager.presets[selectedPresetIndex].wakeOnReading = $0 }
-            ))
-
-            Toggle("Haptic on every reading", isOn: Binding(
-                get: { manager.presets[selectedPresetIndex].hapOnReading },
-                set: { manager.presets[selectedPresetIndex].hapOnReading = $0 }
-            ))
-
-            Stepper(
-                "Outdated data: \(manager.presets[selectedPresetIndex].od) min",
-                value: Binding(
-                    get: { manager.presets[selectedPresetIndex].od },
-                    set: { manager.presets[selectedPresetIndex].od = $0 }
-                ),
-                in: 5...60,
-                step: 5
-            )
-
-            Stepper(
-                "No data: \(manager.presets[selectedPresetIndex].nd) min",
-                value: Binding(
-                    get: { manager.presets[selectedPresetIndex].nd },
-                    set: { manager.presets[selectedPresetIndex].nd = $0 }
-                ),
-                in: 10...120,
-                step: 5
-            )
-
-            ForEach(manager.presets[selectedPresetIndex].hapticSlots.indices, id: \.self) { idx in
-                hapticSlotRow(slotIdx: idx)
+                Button {
+                    if anyDirty {
+                        pendingAddPreset = true
+                        showUnsavedChangesAlert = true
+                    } else {
+                        manager.addPreset()
+                        selectedPresetIndex = manager.presets.count - 1
+                        configTab = .general
+                        generalDirty = true
+                    }
+                } label: {
+                    Image(systemName: "plus.circle")
+                }
             }
 
             actionRow(
@@ -377,18 +425,7 @@ struct DiaWatchSettingsView: View {
             }
 
             actionRow(
-                label: "Save",
-                id: .savePreset,
-                dirty: presetDirty,
-                status: savePresetStatus
-            ) {
-                activeButton = .savePreset
-                manager.savePreset(at: selectedPresetIndex)
-                presetDirty = false
-            }
-
-            actionRow(
-                label: "Delete mode",
+                label: "Delete",
                 id: .deletePreset,
                 dirty: false,
                 status: deletePresetStatus,
@@ -400,16 +437,100 @@ struct DiaWatchSettingsView: View {
                 selectedPresetIndex = max(0, selectedPresetIndex - 1)
             }
 
-            Button("Add mode") {
-                if presetDirty {
-                    pendingAddPreset = true
-                    showUnsavedChangesAlert = true
-                } else {
-                    manager.addPreset()
-                    selectedPresetIndex = manager.presets.count - 1
-                    presetDirty = true
+            Picker("", selection: Binding(
+                get: { configTab },
+                set: { newTab in
+                    guard newTab != configTab else { return }
+                    let isNewMode = selectedPresetIndex >= UserDefaults.standard.diaWatchPresets.count
+                    if isNewMode {
+                        pendingTabSwitch = newTab
+                        showNewModeSaveAlert = true
+                    } else if currentTabDirty {
+                        pendingTabSwitch = newTab
+                        showTabChangeAlert = true
+                    } else {
+                        configTab = newTab
+                    }
+                }
+            )) {
+                ForEach(ConfigTab.allCases, id: \.self) { tab in
+                    Text(tab.rawValue).tag(tab)
                 }
             }
+            .pickerStyle(.segmented)
+
+            if configTab == .general {
+                generalTabContent
+            } else {
+                slotsTabContent
+            }
+
+            actionRow(
+                label: "Save",
+                id: configTab == .general ? .saveGeneral : .saveSlots,
+                dirty: currentTabDirty,
+                status: configTab == .general ? saveGeneralStatus : saveSlotsStatus,
+                disabled: !currentTabDirty
+            ) {
+                if configTab == .general {
+                    activeButton = .saveGeneral
+                    manager.saveGeneralConfig(at: selectedPresetIndex)
+                } else {
+                    activeButton = .saveSlots
+                    manager.saveSlots(at: selectedPresetIndex)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var generalTabContent: some View {
+        HStack {
+            Text("Name")
+            Spacer()
+            TextField("mode name", text: Binding(
+                get: { manager.presets[selectedPresetIndex].name },
+                set: { manager.presets[selectedPresetIndex].name = $0 }
+            ))
+            .multilineTextAlignment(.trailing)
+            .foregroundColor(.secondary)
+        }
+
+        Toggle("Wake screen on new reading", isOn: Binding(
+            get: { manager.presets[selectedPresetIndex].wakeOnReading },
+            set: { manager.presets[selectedPresetIndex].wakeOnReading = $0 }
+        ))
+
+        Toggle("Haptic on every reading", isOn: Binding(
+            get: { manager.presets[selectedPresetIndex].hapOnReading },
+            set: { manager.presets[selectedPresetIndex].hapOnReading = $0 }
+        ))
+
+        Stepper(
+            "Outdated data: \(manager.presets[selectedPresetIndex].od) min",
+            value: Binding(
+                get: { manager.presets[selectedPresetIndex].od },
+                set: { manager.presets[selectedPresetIndex].od = $0 }
+            ),
+            in: 5...60,
+            step: 5
+        )
+
+        Stepper(
+            "No data: \(manager.presets[selectedPresetIndex].nd) min",
+            value: Binding(
+                get: { manager.presets[selectedPresetIndex].nd },
+                set: { manager.presets[selectedPresetIndex].nd = $0 }
+            ),
+            in: 10...120,
+            step: 5
+        )
+    }
+
+    @ViewBuilder
+    private var slotsTabContent: some View {
+        ForEach(manager.presets[selectedPresetIndex].hapticSlots.indices, id: \.self) { idx in
+            hapticSlotRow(slotIdx: idx)
         }
     }
 
