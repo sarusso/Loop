@@ -178,11 +178,11 @@ final class DiaWatchManager: NSObject, ObservableObject {
     }
 
     func pushTest(mgdl: Int = 190) {
-        sendReading(mgdl: mgdl, trend: " -", ts: Int(Date().timeIntervalSince1970))
+        sendReading(mgdl: mgdl, trend: "f", ts: Int(Date().timeIntervalSince1970))
     }
 
     private func sendReading(mgdl: Int, trend: String, ts: Int) {
-        let message = "GB({\"face\":\"diawatch\",\"t\":\"reading\",\"v\":\(mgdl),\"trend\":\"\(trend)\",\"ts\":\(ts)})\r\n"
+        let message = "GB({\"app\":\"dw\",\"t\":\"r\",\"v\":\(mgdl),\"tr\":\"\(trend)\",\"ts\":\(ts)})\r\n"
         lastSentMgdl = mgdl
         log.default("Sending DiaWatch reading: %{public}@", message)
         beginTransmission(message) { [weak self] in
@@ -208,7 +208,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         UserDefaults.standard.diaWatchPresets = presets
 
         let preset = presets[index]
-        let configMsg = "GB({\"face\":\"diawatch\",\"t\":\"s_c\",\"p\":\(index),\"n\":\"\(preset.name)\",\"hap\":\(preset.hapOnReading ? 1 : 0),\"wake\":\(preset.wakeOnReading ? 1 : 0),\"od\":\(preset.od),\"nd\":\(preset.nd)})\r\n"
+        let configMsg = "GB({\"app\":\"dw\",\"t\":\"s_c\",\"p\":\(index),\"n\":\"\(preset.name)\",\"hap\":\(preset.hapOnReading ? 1 : 0),\"wake\":\(preset.wakeOnReading ? 1 : 0),\"od\":\(preset.od),\"nd\":\(preset.nd)})\r\n"
 
         log.default("Sending DiaWatch mode %{public}d general config", index)
         beginTransmission(configMsg) { [weak self] in
@@ -230,8 +230,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let preset = presets[index]
         var commands: [(String, (() -> Void)?)] = preset.hapticSlots.enumerated().map { slotIdx, slot in
             let msg = slot.enabled
-                ? "GB({\"face\":\"diawatch\",\"t\":\"s_h\",\"p\":\(index),\"idx\":\(slotIdx),\"op\":\"\(slot.op)\",\"thr\":\(slot.thr),\"pat\":\"\(slot.pat)\"})\r\n"
-                : "GB({\"face\":\"diawatch\",\"t\":\"d_h\",\"p\":\(index),\"idx\":\(slotIdx)})\r\n"
+                ? "GB({\"app\":\"dw\",\"t\":\"s_h\",\"p\":\(index),\"idx\":\(slotIdx),\"op\":\"\(slot.op)\",\"thr\":\(slot.thr),\"pat\":\"\(slot.pat)\"})\r\n"
+                : "GB({\"app\":\"dw\",\"t\":\"d_h\",\"p\":\(index),\"idx\":\(slotIdx)})\r\n"
             return (msg, nil)
         }
 
@@ -273,7 +273,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         guard isPersistedToPhone else { return }
 
         log.default("Deleting DiaWatch preset %{public}d", lastIdx)
-        beginTransmission("GB({\"face\":\"diawatch\",\"t\":\"d_p\",\"p\":\(lastIdx)})\r\n") { [weak self] in
+        beginTransmission("GB({\"app\":\"dw\",\"t\":\"d_p\",\"p\":\(lastIdx)})\r\n") { [weak self] in
             guard let self else { return }
             if self.receivedResponse {
                 self.lastPushError = self.bleResponse.contains("ERROR") ? "Watch rejected preset delete" : nil
@@ -286,7 +286,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
     func activatePreset(at index: Int) {
         guard !isSending, index < presets.count else { return }
-        let message = "GB({\"face\":\"diawatch\",\"t\":\"a_p\",\"p\":\(index)})\r\n"
+        let message = "GB({\"app\":\"dw\",\"t\":\"a_p\",\"p\":\(index)})\r\n"
         log.default("Activating DiaWatch preset %{public}d", index)
         beginTransmission(message) { [weak self] in
             guard let self else { return }
@@ -546,14 +546,14 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
     private func diaWatchTrend(from trend: GlucoseTrend?) -> String {
         switch trend {
-        case .upUpUp:       return ">>"
-        case .upUp:         return ">>"
-        case .up:           return "> "
-        case .flat:         return " -"
-        case .down:         return "< "
-        case .downDown:     return "<<"
-        case .downDownDown: return "<<"
-        case nil:           return " -"
+        case .upUpUp:       return "uuu"
+        case .upUp:         return "uu"
+        case .up:           return "u"
+        case .flat:         return "f"
+        case .down:         return "d"
+        case .downDown:     return "dd"
+        case .downDownDown: return "ddd"
+        case nil:           return "f"
         }
     }
 }
