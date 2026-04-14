@@ -373,30 +373,28 @@ extension SettingsView {
     private var diaWatchSection: some View {
         Section {
             NavigationLink(destination: DiaWatchSettingsView(manager: diaWatchManager)) {
-                HStack(spacing: 12) {
-                    Image(systemName: "applewatch")
+                LargeButton(
+                    action: {},
+                    includeArrow: false,
+                    imageView: Image(systemName: "applewatch")
                         .resizable()
-                        .scaledToFit()
-                        .frame(width: 30, height: 30)
-                        .foregroundColor(.accentColor)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("DiaWatch")
-                        Text(diaWatchManager.pairedDeviceName ?? "Not paired")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        if let date = diaWatchManager.lastPushDate, diaWatchManager.pairedDeviceName != nil {
-                            let timeStr = diaWatchLastPushSummary(date: date)
-                            Text(timeStr)
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    Spacer()
-                    diaWatchStatusIndicator
-                }
-                .padding(.vertical, 4)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 30),
+                    secondaryImageView: diaWatchStatusIndicator,
+                    label: "DiaWatch",
+                    descriptiveText: diaWatchDescriptiveText
+                )
+                .padding(.vertical, -2)
             }
         }
+    }
+
+    private var diaWatchDescriptiveText: String {
+        guard let name = diaWatchManager.pairedDeviceName else { return "Not paired" }
+        if let date = diaWatchManager.lastPushDate {
+            return "\(name) — \(diaWatchLastPushSummary(date: date))"
+        }
+        return name
     }
 
     @ViewBuilder
