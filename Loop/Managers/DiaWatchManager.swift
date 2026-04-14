@@ -42,14 +42,37 @@ final class DiaWatchManager: NSObject, ObservableObject {
         var name: String
         var hapOnReading: Bool
         var wakeOnReading: Bool
+        var od: Int      // outdated data threshold in minutes
+        var nd: Int      // no data threshold in minutes
         var hapticSlots: [HapticSlot]
 
         static let defaultPreset = Preset(
             name: "default",
             hapOnReading: false,
             wakeOnReading: false,
+            od: 15,
+            nd: 30,
             hapticSlots: HapticSlot.defaults
         )
+
+        init(name: String, hapOnReading: Bool, wakeOnReading: Bool, od: Int = 15, nd: Int = 30, hapticSlots: [HapticSlot]) {
+            self.name = name
+            self.hapOnReading = hapOnReading
+            self.wakeOnReading = wakeOnReading
+            self.od = od
+            self.nd = nd
+            self.hapticSlots = hapticSlots
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            name = try c.decode(String.self, forKey: .name)
+            hapOnReading = try c.decode(Bool.self, forKey: .hapOnReading)
+            wakeOnReading = try c.decode(Bool.self, forKey: .wakeOnReading)
+            od = try c.decodeIfPresent(Int.self, forKey: .od) ?? 15
+            nd = try c.decodeIfPresent(Int.self, forKey: .nd) ?? 30
+            hapticSlots = try c.decode([HapticSlot].self, forKey: .hapticSlots)
+        }
     }
 
     // MARK: - Published state (drives settings UI)
@@ -185,7 +208,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         UserDefaults.standard.diaWatchPresets = presets
 
         let preset = presets[index]
-        let configMsg = "GB({\"face\":\"diawatch\",\"t\":\"s_c\",\"p\":\(index),\"n\":\"\(preset.name)\",\"hap\":\(preset.hapOnReading ? 1 : 0),\"wake\":\(preset.wakeOnReading ? 1 : 0)})\r\n"
+        let configMsg = "GB({\"face\":\"diawatch\",\"t\":\"s_c\",\"p\":\(index),\"n\":\"\(preset.name)\",\"hap\":\(preset.hapOnReading ? 1 : 0),\"wake\":\(preset.wakeOnReading ? 1 : 0),\"od\":\(preset.od),\"nd\":\(preset.nd)})\r\n"
 
         var commands: [(String, (() -> Void)?)] = [(configMsg, nil)]
         commands += preset.hapticSlots.enumerated().map { slotIdx, slot -> (String, (() -> Void)?) in

@@ -342,6 +342,26 @@ struct DiaWatchSettingsView: View {
                 set: { manager.presets[selectedPresetIndex].hapOnReading = $0 }
             ))
 
+            Stepper(
+                "Outdated data threshold: \(manager.presets[selectedPresetIndex].od) min",
+                value: Binding(
+                    get: { manager.presets[selectedPresetIndex].od },
+                    set: { manager.presets[selectedPresetIndex].od = $0 }
+                ),
+                in: 5...60,
+                step: 5
+            )
+
+            Stepper(
+                "No data threshold: \(manager.presets[selectedPresetIndex].nd) min",
+                value: Binding(
+                    get: { manager.presets[selectedPresetIndex].nd },
+                    set: { manager.presets[selectedPresetIndex].nd = $0 }
+                ),
+                in: 10...120,
+                step: 5
+            )
+
             ForEach(manager.presets[selectedPresetIndex].hapticSlots.indices, id: \.self) { idx in
                 hapticSlotRow(slotIdx: idx)
             }
