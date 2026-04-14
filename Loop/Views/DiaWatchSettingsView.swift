@@ -343,7 +343,7 @@ struct DiaWatchSettingsView: View {
             ))
 
             Stepper(
-                "Outdated data threshold: \(manager.presets[selectedPresetIndex].od) min",
+                "Outdated data: \(manager.presets[selectedPresetIndex].od) min",
                 value: Binding(
                     get: { manager.presets[selectedPresetIndex].od },
                     set: { manager.presets[selectedPresetIndex].od = $0 }
@@ -353,7 +353,7 @@ struct DiaWatchSettingsView: View {
             )
 
             Stepper(
-                "No data threshold: \(manager.presets[selectedPresetIndex].nd) min",
+                "No data: \(manager.presets[selectedPresetIndex].nd) min",
                 value: Binding(
                     get: { manager.presets[selectedPresetIndex].nd },
                     set: { manager.presets[selectedPresetIndex].nd = $0 }

@@ -50,12 +50,12 @@ final class DiaWatchManager: NSObject, ObservableObject {
             name: "default",
             hapOnReading: false,
             wakeOnReading: false,
-            od: 15,
+            od: 10,
             nd: 30,
             hapticSlots: HapticSlot.defaults
         )
 
-        init(name: String, hapOnReading: Bool, wakeOnReading: Bool, od: Int = 15, nd: Int = 30, hapticSlots: [HapticSlot]) {
+        init(name: String, hapOnReading: Bool, wakeOnReading: Bool, od: Int = 10, nd: Int = 30, hapticSlots: [HapticSlot]) {
             self.name = name
             self.hapOnReading = hapOnReading
             self.wakeOnReading = wakeOnReading
@@ -69,7 +69,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
             name = try c.decode(String.self, forKey: .name)
             hapOnReading = try c.decode(Bool.self, forKey: .hapOnReading)
             wakeOnReading = try c.decode(Bool.self, forKey: .wakeOnReading)
-            od = try c.decodeIfPresent(Int.self, forKey: .od) ?? 15
+            od = try c.decodeIfPresent(Int.self, forKey: .od) ?? 10
             nd = try c.decodeIfPresent(Int.self, forKey: .nd) ?? 30
             hapticSlots = try c.decode([HapticSlot].self, forKey: .hapticSlots)
         }
