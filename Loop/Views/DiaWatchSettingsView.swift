@@ -83,6 +83,7 @@ struct DiaWatchSettingsView: View {
                     manager.presets[selectedPresetIndex] = savedPresets[selectedPresetIndex]
                 } else {
                     manager.presets.removeLast()
+                    selectedPresetIndex = max(0, manager.presets.count - 1)
                 }
                 presetDirty = false
                 if pendingDismiss {
