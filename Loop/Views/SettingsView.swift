@@ -78,8 +78,8 @@ public struct SettingsView: View {
                     if FeatureFlags.automaticBolusEnabled {
                         dosingStrategySection
                     }
-                    diaWatchSection
                     alertManagementSection
+                    diaWatchSection
                     if viewModel.pumpManagerSettingsViewModel.isSetUp() {
                         configurationSection
                     }
