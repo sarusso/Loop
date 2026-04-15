@@ -61,7 +61,14 @@ final class DiaWatchManager: NSObject, ObservableObject {
         var st: TapAction    // single tap action
         var dt: TapAction    // double tap action
         var lt: TapAction    // long tap action
+        var bandCutoffs: [Int]      // 4 ascending glucose cutoffs in mg/dL
+        var bandHaptics: [String]   // 5 haptic patterns, one per band
         var hapticSlots: [HapticSlot]
+
+        static let defaultBandCutoffs: [Int] = [70, 100, 200, 300]
+        static let defaultBandHaptics: [String] = [
+            "sos", "notification", "single_buzz", "notification", "sos"
+        ]
 
         static let defaultPreset = Preset(
             name: "default",
@@ -72,10 +79,12 @@ final class DiaWatchManager: NSObject, ObservableObject {
             st: .nothing,
             dt: .wake,
             lt: .haptics,
+            bandCutoffs: defaultBandCutoffs,
+            bandHaptics: defaultBandHaptics,
             hapticSlots: HapticSlot.defaults
         )
 
-        init(name: String, hapOnReading: Bool, wakeOnReading: Bool, od: Int = 10, nd: Int = 30, st: TapAction = .nothing, dt: TapAction = .wake, lt: TapAction = .haptics, hapticSlots: [HapticSlot]) {
+        init(name: String, hapOnReading: Bool, wakeOnReading: Bool, od: Int = 10, nd: Int = 30, st: TapAction = .nothing, dt: TapAction = .wake, lt: TapAction = .haptics, bandCutoffs: [Int] = Preset.defaultBandCutoffs, bandHaptics: [String] = Preset.defaultBandHaptics, hapticSlots: [HapticSlot]) {
             self.name = name
             self.hapOnReading = hapOnReading
             self.wakeOnReading = wakeOnReading
@@ -84,6 +93,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
             self.st = st
             self.dt = dt
             self.lt = lt
+            self.bandCutoffs = bandCutoffs
+            self.bandHaptics = bandHaptics
             self.hapticSlots = hapticSlots
         }
 
@@ -97,6 +108,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
             st = try c.decodeIfPresent(TapAction.self, forKey: .st) ?? .nothing
             dt = try c.decodeIfPresent(TapAction.self, forKey: .dt) ?? .wake
             lt = try c.decodeIfPresent(TapAction.self, forKey: .lt) ?? .haptics
+            bandCutoffs = try c.decodeIfPresent([Int].self, forKey: .bandCutoffs) ?? Preset.defaultBandCutoffs
+            bandHaptics = try c.decodeIfPresent([String].self, forKey: .bandHaptics) ?? Preset.defaultBandHaptics
             hapticSlots = try c.decode([HapticSlot].self, forKey: .hapticSlots)
         }
     }
@@ -227,6 +240,28 @@ final class DiaWatchManager: NSObject, ObservableObject {
     }
 
     // MARK: - Preset management
+
+    func saveBands(at index: Int) {
+        guard !isSending, index < presets.count else { return }
+
+        UserDefaults.standard.diaWatchPresets = presets
+
+        let preset = presets[index]
+        let bcJSON = "[" + preset.bandCutoffs.map(String.init).joined(separator: ",") + "]"
+        let bhJSON = "[" + preset.bandHaptics.map { "\"\($0)\"" }.joined(separator: ",") + "]"
+        let bandsMsg = "GB({\"app\":\"dw\",\"t\":\"s_b\",\"p\":\(index),\"bc\":\(bcJSON),\"bh\":\(bhJSON)})\r\n"
+
+        log.default("Sending DiaWatch mode %{public}d bands", index)
+        beginTransmission(bandsMsg) { [weak self] in
+            guard let self else { return }
+            if self.receivedResponse {
+                self.lastPushError = self.bleResponse.contains("ERROR") ? "Watch rejected bands" : nil
+            } else {
+                self.lastPushError = "No response from watch"
+            }
+            self.log.default("DiaWatch mode %{public}d bands saved", index)
+        }
+    }
 
     func saveGeneralConfig(at index: Int) {
         guard !isSending, index < presets.count else { return }

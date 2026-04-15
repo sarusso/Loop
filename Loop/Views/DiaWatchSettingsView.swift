@@ -16,12 +16,13 @@ struct DiaWatchSettingsView: View {
     @State private var selectedPresetIndex: Int = 0
     @State private var presetDirty = false
 
-    private enum ConfigTab: String, CaseIterable { case general = "General", slots = "Slots" }
+    private enum ConfigTab: String, CaseIterable { case general = "General", bands = "Bands", slots = "Slots" }
     @State private var configTab: ConfigTab = .general
     @State private var generalDirty = false
     @State private var slotsDirty = false
+    @State private var bandsDirty = false
 
-    private enum ActiveButton { case none, test, saveGeneral, saveSlots, activatePreset, deletePreset, testHaptic, customCommand, setTime, battery, freeMem, uptime }
+    private enum ActiveButton { case none, test, saveGeneral, saveSlots, saveBands, activatePreset, deletePreset, testHaptic, customCommand, setTime, battery, freeMem, uptime }
     @State private var activeButton: ActiveButton = .none
 
     struct ButtonStatus {
@@ -30,6 +31,7 @@ struct DiaWatchSettingsView: View {
     }
     @State private var saveGeneralStatus: ButtonStatus? = nil
     @State private var saveSlotsStatus: ButtonStatus? = nil
+    @State private var saveBandsStatus: ButtonStatus? = nil
     @State private var activatePresetStatus: ButtonStatus? = nil
     @State private var deletePresetStatus: ButtonStatus? = nil
     @State private var showUnsavedChangesAlert = false
@@ -103,6 +105,8 @@ struct DiaWatchSettingsView: View {
                 || current.dt != saved.dt
                 || current.lt != saved.lt
             slotsDirty = current.hapticSlots != saved.hapticSlots
+            bandsDirty = current.bandCutoffs != saved.bandCutoffs
+                || current.bandHaptics != saved.bandHaptics
         }
         .alert("Unsaved Changes", isPresented: $showUnsavedChangesAlert) {
             Button("Discard", role: .destructive) {
@@ -116,6 +120,7 @@ struct DiaWatchSettingsView: View {
                 }
                 generalDirty = false
                 slotsDirty = false
+                bandsDirty = false
                 if pendingDismiss {
                     pendingDismiss = false
                     dismiss()
@@ -139,12 +144,16 @@ struct DiaWatchSettingsView: View {
         .alert("Unsaved Changes", isPresented: $showTabChangeAlert) {
             Button("Save", role: .none) {
                 if let tab = pendingTabSwitch {
-                    if configTab == .general {
+                    switch configTab {
+                    case .general:
                         activeButton = .saveGeneral
                         manager.saveGeneralConfig(at: selectedPresetIndex)
-                    } else {
+                    case .slots:
                         activeButton = .saveSlots
                         manager.saveSlots(at: selectedPresetIndex)
+                    case .bands:
+                        activeButton = .saveBands
+                        manager.saveBands(at: selectedPresetIndex)
                     }
                     configTab = tab
                     pendingTabSwitch = nil
@@ -157,7 +166,11 @@ struct DiaWatchSettingsView: View {
                     if selectedPresetIndex < savedPresets.count {
                         manager.presets[selectedPresetIndex] = savedPresets[selectedPresetIndex]
                     }
-                    if configTab == .general { generalDirty = false } else { slotsDirty = false }
+                    switch configTab {
+                    case .general: generalDirty = false
+                    case .slots:   slotsDirty = false
+                    case .bands:     bandsDirty = false
+                    }
                     configTab = tab
                     pendingTabSwitch = nil
                 }
@@ -187,6 +200,7 @@ struct DiaWatchSettingsView: View {
             case .test:          text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
             case .saveGeneral:   text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
             case .saveSlots:     text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
+            case .saveBands:     text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
             case .activatePreset: text = isError ? (manager.lastPushError ?? "Failed") : "Activated!"
             case .deletePreset:   text = isError ? (manager.lastPushError ?? "Failed") : "Deleted!"
             case .testHaptic:    text = isError ? (manager.lastPushError ?? "Failed") : "Played!"
@@ -211,6 +225,10 @@ struct DiaWatchSettingsView: View {
                 saveSlotsStatus = status
                 if !isError { slotsDirty = false }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { saveSlotsStatus = nil }
+            case .saveBands:
+                saveBandsStatus = status
+                if !isError { bandsDirty = false }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { saveBandsStatus = nil }
             case .activatePreset:
                 activatePresetStatus = status
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { activatePresetStatus = nil }
@@ -374,8 +392,30 @@ struct DiaWatchSettingsView: View {
 
     // MARK: - Configuration
 
-    private var anyDirty: Bool { generalDirty || slotsDirty }
-    private var currentTabDirty: Bool { configTab == .general ? generalDirty : slotsDirty }
+    private var anyDirty: Bool { generalDirty || slotsDirty || bandsDirty }
+    private var currentTabDirty: Bool {
+        switch configTab {
+        case .general: return generalDirty
+        case .slots:   return slotsDirty
+        case .bands:     return bandsDirty
+        }
+    }
+
+    private func currentTabSaveStatus() -> ButtonStatus? {
+        switch configTab {
+        case .general: return saveGeneralStatus
+        case .slots:   return saveSlotsStatus
+        case .bands:     return saveBandsStatus
+        }
+    }
+
+    private func currentTabSaveButtonId() -> ActiveButton {
+        switch configTab {
+        case .general: return .saveGeneral
+        case .slots:   return .saveSlots
+        case .bands:     return .saveBands
+        }
+    }
 
     private var configurationSection: some View {
         Section(header: Text("Modes")) {
@@ -462,25 +502,29 @@ struct DiaWatchSettingsView: View {
             }
             .pickerStyle(.segmented)
 
-            if configTab == .general {
-                generalTabContent
-            } else {
-                slotsTabContent
+            switch configTab {
+            case .general: generalTabContent
+            case .slots:   slotsTabContent
+            case .bands:     bandsTabContent
             }
 
             actionRow(
                 label: "Save",
-                id: configTab == .general ? .saveGeneral : .saveSlots,
+                id: currentTabSaveButtonId(),
                 dirty: currentTabDirty,
-                status: configTab == .general ? saveGeneralStatus : saveSlotsStatus,
+                status: currentTabSaveStatus(),
                 disabled: !currentTabDirty
             ) {
-                if configTab == .general {
+                switch configTab {
+                case .general:
                     activeButton = .saveGeneral
                     manager.saveGeneralConfig(at: selectedPresetIndex)
-                } else {
+                case .slots:
                     activeButton = .saveSlots
                     manager.saveSlots(at: selectedPresetIndex)
+                case .bands:
+                    activeButton = .saveBands
+                    manager.saveBands(at: selectedPresetIndex)
                 }
             }
         }
@@ -551,6 +595,58 @@ struct DiaWatchSettingsView: View {
         ForEach(manager.presets[selectedPresetIndex].hapticSlots.indices, id: \.self) { idx in
             hapticSlotRow(slotIdx: idx)
         }
+    }
+
+    // MARK: - Bands tab
+
+    private static let bandLabels = ["Very Low", "Low", "OK", "High", "Very High"]
+
+    @ViewBuilder
+    private var bandsTabContent: some View {
+        ForEach(0..<5, id: \.self) { bandIdx in
+            bandRow(bandIdx: bandIdx)
+            if bandIdx < 4 {
+                bandCutoffRow(cutoffIdx: bandIdx)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func bandRow(bandIdx: Int) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(Self.bandLabels[bandIdx]).fontWeight(.medium)
+            HStack {
+                Text("Haptic:")
+                Picker("", selection: Binding(
+                    get: { manager.presets[selectedPresetIndex].bandHaptics[bandIdx] },
+                    set: { manager.presets[selectedPresetIndex].bandHaptics[bandIdx] = $0 }
+                )) {
+                    ForEach(DiaWatchManager.HapticSlot.allPatterns, id: \.self) { pat in
+                        Text(Self.formatPattern(pat)).tag(pat)
+                    }
+                }
+                .labelsHidden()
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private func bandCutoffRow(cutoffIdx: Int) -> some View {
+        let cutoffs = manager.presets[selectedPresetIndex].bandCutoffs
+        let lower = cutoffIdx == 0 ? 40 : cutoffs[cutoffIdx - 1] + 5
+        let upper = cutoffIdx == 3 ? 400 : cutoffs[cutoffIdx + 1] - 5
+
+        Stepper(
+            "Cutoff: \(cutoffs[cutoffIdx]) mg/dL",
+            value: Binding(
+                get: { manager.presets[selectedPresetIndex].bandCutoffs[cutoffIdx] },
+                set: { manager.presets[selectedPresetIndex].bandCutoffs[cutoffIdx] = $0 }
+            ),
+            in: lower...max(lower, upper),
+            step: 5
+        )
+        .font(.caption)
     }
 
     @ViewBuilder
