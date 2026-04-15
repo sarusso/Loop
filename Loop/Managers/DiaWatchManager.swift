@@ -38,12 +38,29 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
     // MARK: - Preset model
 
+    enum TapAction: Int, Codable, CaseIterable {
+        case nothing = 0
+        case wake = 1
+        case haptics = 2
+
+        var label: String {
+            switch self {
+            case .nothing: return "Nothing"
+            case .wake:    return "Wake"
+            case .haptics: return "Haptics"
+            }
+        }
+    }
+
     struct Preset: Codable, Equatable {
         var name: String
         var hapOnReading: Bool
         var wakeOnReading: Bool
         var od: Int      // outdated data threshold in minutes
         var nd: Int      // no data threshold in minutes
+        var st: TapAction    // single tap action
+        var dt: TapAction    // double tap action
+        var lt: TapAction    // long tap action
         var hapticSlots: [HapticSlot]
 
         static let defaultPreset = Preset(
@@ -52,15 +69,21 @@ final class DiaWatchManager: NSObject, ObservableObject {
             wakeOnReading: false,
             od: 10,
             nd: 30,
+            st: .nothing,
+            dt: .wake,
+            lt: .haptics,
             hapticSlots: HapticSlot.defaults
         )
 
-        init(name: String, hapOnReading: Bool, wakeOnReading: Bool, od: Int = 10, nd: Int = 30, hapticSlots: [HapticSlot]) {
+        init(name: String, hapOnReading: Bool, wakeOnReading: Bool, od: Int = 10, nd: Int = 30, st: TapAction = .nothing, dt: TapAction = .wake, lt: TapAction = .haptics, hapticSlots: [HapticSlot]) {
             self.name = name
             self.hapOnReading = hapOnReading
             self.wakeOnReading = wakeOnReading
             self.od = od
             self.nd = nd
+            self.st = st
+            self.dt = dt
+            self.lt = lt
             self.hapticSlots = hapticSlots
         }
 
@@ -71,6 +94,9 @@ final class DiaWatchManager: NSObject, ObservableObject {
             wakeOnReading = try c.decode(Bool.self, forKey: .wakeOnReading)
             od = try c.decodeIfPresent(Int.self, forKey: .od) ?? 10
             nd = try c.decodeIfPresent(Int.self, forKey: .nd) ?? 30
+            st = try c.decodeIfPresent(TapAction.self, forKey: .st) ?? .nothing
+            dt = try c.decodeIfPresent(TapAction.self, forKey: .dt) ?? .wake
+            lt = try c.decodeIfPresent(TapAction.self, forKey: .lt) ?? .haptics
             hapticSlots = try c.decode([HapticSlot].self, forKey: .hapticSlots)
         }
     }
@@ -208,7 +234,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         UserDefaults.standard.diaWatchPresets = presets
 
         let preset = presets[index]
-        let configMsg = "GB({\"app\":\"dw\",\"t\":\"s_c\",\"p\":\(index),\"n\":\"\(preset.name)\",\"hap\":\(preset.hapOnReading ? 1 : 0),\"wake\":\(preset.wakeOnReading ? 1 : 0),\"od\":\(preset.od),\"nd\":\(preset.nd)})\r\n"
+        let configMsg = "GB({\"app\":\"dw\",\"t\":\"s_c\",\"p\":\(index),\"n\":\"\(preset.name)\",\"rh\":\(preset.hapOnReading ? 1 : 0),\"rw\":\(preset.wakeOnReading ? 1 : 0),\"od\":\(preset.od),\"nd\":\(preset.nd),\"st\":\(preset.st.rawValue),\"dt\":\(preset.dt.rawValue),\"lt\":\(preset.lt.rawValue)})\r\n"
 
         log.default("Sending DiaWatch mode %{public}d general config", index)
         beginTransmission(configMsg) { [weak self] in

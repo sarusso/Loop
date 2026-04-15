@@ -99,6 +99,9 @@ struct DiaWatchSettingsView: View {
                 || current.wakeOnReading != saved.wakeOnReading
                 || current.od != saved.od
                 || current.nd != saved.nd
+                || current.st != saved.st
+                || current.dt != saved.dt
+                || current.lt != saved.lt
             slotsDirty = current.hapticSlots != saved.hapticSlots
         }
         .alert("Unsaved Changes", isPresented: $showUnsavedChangesAlert) {
@@ -525,6 +528,22 @@ struct DiaWatchSettingsView: View {
             in: 10...120,
             step: 5
         )
+
+        tapActionPicker(label: "Single tap", keyPath: \.st)
+        tapActionPicker(label: "Double tap", keyPath: \.dt)
+        tapActionPicker(label: "Long tap", keyPath: \.lt)
+    }
+
+    @ViewBuilder
+    private func tapActionPicker(label: String, keyPath: WritableKeyPath<DiaWatchManager.Preset, DiaWatchManager.TapAction>) -> some View {
+        Picker(label, selection: Binding(
+            get: { manager.presets[selectedPresetIndex][keyPath: keyPath] },
+            set: { manager.presets[selectedPresetIndex][keyPath: keyPath] = $0 }
+        )) {
+            ForEach(DiaWatchManager.TapAction.allCases, id: \.self) { action in
+                Text(action.label).tag(action)
+            }
+        }
     }
 
     @ViewBuilder
