@@ -25,6 +25,8 @@ struct DiaWatchSettingsView: View {
     private enum ActiveButton { case none, test, saveGeneral, saveAlerts, saveRanges, activatePreset, deletePreset, testHaptic, customCommand, setTime, battery, freeMem, uptime }
     @State private var activeButton: ActiveButton = .none
 
+    @FocusState private var presetNameFocused: Bool
+
     struct ButtonStatus {
         var text: String
         var isError: Bool
@@ -71,6 +73,7 @@ struct DiaWatchSettingsView: View {
             debugSection
         }
         .navigationBarTitle("DiaWatch", displayMode: .inline)
+        .dismissKeyboardOnScroll()
         .navigationBarBackButtonHidden(anyDirty)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
@@ -97,7 +100,6 @@ struct DiaWatchSettingsView: View {
             let saved = savedPresets[selectedPresetIndex]
             let current = manager.presets[selectedPresetIndex]
             generalDirty = current.name != saved.name
-                || current.hapOnReading != saved.hapOnReading
                 || current.wakeOnReading != saved.wakeOnReading
                 || current.od != saved.od
                 || current.nd != saved.nd
@@ -107,6 +109,7 @@ struct DiaWatchSettingsView: View {
             alertsDirty = current.hapticAlerts != saved.hapticAlerts
             rangesDirty = current.rangeCutoffs != saved.rangeCutoffs
                 || current.rangeHaptics != saved.rangeHaptics
+                || current.rangePlayHaptic != saved.rangePlayHaptic
         }
         .alert("Unsaved Changes", isPresented: $showUnsavedChangesAlert) {
             Button("Discard", role: .destructive) {
@@ -541,16 +544,14 @@ struct DiaWatchSettingsView: View {
             ))
             .multilineTextAlignment(.trailing)
             .foregroundColor(.secondary)
+            .focused($presetNameFocused)
+            .submitLabel(.done)
+            .onSubmit { presetNameFocused = false }
         }
 
         Toggle("Wake screen on new reading", isOn: Binding(
             get: { manager.presets[selectedPresetIndex].wakeOnReading },
             set: { manager.presets[selectedPresetIndex].wakeOnReading = $0 }
-        ))
-
-        Toggle("Haptic on every reading", isOn: Binding(
-            get: { manager.presets[selectedPresetIndex].hapOnReading },
-            set: { manager.presets[selectedPresetIndex].hapOnReading = $0 }
         ))
 
         Stepper(
@@ -627,6 +628,10 @@ struct DiaWatchSettingsView: View {
                 }
                 .labelsHidden()
             }
+            Toggle("Play on new reading", isOn: Binding(
+                get: { manager.presets[selectedPresetIndex].rangePlayHaptic[rangeIdx] },
+                set: { manager.presets[selectedPresetIndex].rangePlayHaptic[rangeIdx] = $0 }
+            ))
         }
         .padding(.vertical, 2)
     }
@@ -860,6 +865,17 @@ struct DiaWatchSettingsView: View {
         case (-60)...: return .green
         case (-80)...: return .yellow
         default:       return .red
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func dismissKeyboardOnScroll() -> some View {
+        if #available(iOS 16.0, *) {
+            self.scrollDismissesKeyboard(.interactively)
+        } else {
+            self
         }
     }
 }

@@ -54,7 +54,6 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
     struct Preset: Codable, Equatable {
         var name: String
-        var hapOnReading: Bool
         var wakeOnReading: Bool
         var od: Int      // outdated data threshold in minutes
         var nd: Int      // no data threshold in minutes
@@ -63,16 +62,17 @@ final class DiaWatchManager: NSObject, ObservableObject {
         var lt: TapAction    // long tap action
         var rangeCutoffs: [Int]      // 4 ascending glucose cutoffs in mg/dL
         var rangeHaptics: [String]   // 5 haptic patterns, one per range
+        var rangePlayHaptic: [Bool]  // 5 per-range flags: play haptic on new reading in that range
         var hapticAlerts: [HapticAlert]
 
         static let defaultRangeCutoffs: [Int] = [70, 100, 200, 300]
         static let defaultRangeHaptics: [String] = [
             "sos", "notification", "single_buzz", "notification", "sos"
         ]
+        static let defaultRangePlayHaptic: [Bool] = [true, true, true, true, true]
 
         static let defaultPreset = Preset(
             name: "default",
-            hapOnReading: false,
             wakeOnReading: false,
             od: 10,
             nd: 30,
@@ -81,12 +81,12 @@ final class DiaWatchManager: NSObject, ObservableObject {
             lt: .haptics,
             rangeCutoffs: defaultRangeCutoffs,
             rangeHaptics: defaultRangeHaptics,
+            rangePlayHaptic: defaultRangePlayHaptic,
             hapticAlerts: HapticAlert.defaults
         )
 
-        init(name: String, hapOnReading: Bool, wakeOnReading: Bool, od: Int = 10, nd: Int = 30, st: TapAction = .nothing, dt: TapAction = .wake, lt: TapAction = .haptics, rangeCutoffs: [Int] = Preset.defaultRangeCutoffs, rangeHaptics: [String] = Preset.defaultRangeHaptics, hapticAlerts: [HapticAlert]) {
+        init(name: String, wakeOnReading: Bool, od: Int = 10, nd: Int = 30, st: TapAction = .nothing, dt: TapAction = .wake, lt: TapAction = .haptics, rangeCutoffs: [Int] = Preset.defaultRangeCutoffs, rangeHaptics: [String] = Preset.defaultRangeHaptics, rangePlayHaptic: [Bool] = Preset.defaultRangePlayHaptic, hapticAlerts: [HapticAlert]) {
             self.name = name
-            self.hapOnReading = hapOnReading
             self.wakeOnReading = wakeOnReading
             self.od = od
             self.nd = nd
@@ -95,13 +95,13 @@ final class DiaWatchManager: NSObject, ObservableObject {
             self.lt = lt
             self.rangeCutoffs = rangeCutoffs
             self.rangeHaptics = rangeHaptics
+            self.rangePlayHaptic = rangePlayHaptic
             self.hapticAlerts = hapticAlerts
         }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             name = try c.decode(String.self, forKey: .name)
-            hapOnReading = try c.decode(Bool.self, forKey: .hapOnReading)
             wakeOnReading = try c.decode(Bool.self, forKey: .wakeOnReading)
             od = try c.decodeIfPresent(Int.self, forKey: .od) ?? 10
             nd = try c.decodeIfPresent(Int.self, forKey: .nd) ?? 30
@@ -110,6 +110,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
             lt = try c.decodeIfPresent(TapAction.self, forKey: .lt) ?? .haptics
             rangeCutoffs = try c.decodeIfPresent([Int].self, forKey: .rangeCutoffs) ?? Preset.defaultRangeCutoffs
             rangeHaptics = try c.decodeIfPresent([String].self, forKey: .rangeHaptics) ?? Preset.defaultRangeHaptics
+            rangePlayHaptic = try c.decodeIfPresent([Bool].self, forKey: .rangePlayHaptic) ?? Preset.defaultRangePlayHaptic
             hapticAlerts = try c.decode([HapticAlert].self, forKey: .hapticAlerts)
         }
     }
@@ -249,7 +250,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let preset = presets[index]
         let rcJSON = "[" + preset.rangeCutoffs.map(String.init).joined(separator: ",") + "]"
         let rhJSON = "[" + preset.rangeHaptics.map { "\"\($0)\"" }.joined(separator: ",") + "]"
-        let rangesMsg = "GB({\"app\":\"dw\",\"t\":\"s_r\",\"p\":\(index),\"rc\":\(rcJSON),\"rh\":\(rhJSON)})\r\n"
+        let phJSON = "[" + preset.rangePlayHaptic.map { $0 ? "1" : "0" }.joined(separator: ",") + "]"
+        let rangesMsg = "GB({\"app\":\"dw\",\"t\":\"s_r\",\"p\":\(index),\"rc\":\(rcJSON),\"rh\":\(rhJSON),\"ph\":\(phJSON)})\r\n"
 
         log.default("Sending DiaWatch preset %{public}d ranges", index)
         beginTransmission(rangesMsg) { [weak self] in
@@ -269,7 +271,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         UserDefaults.standard.diaWatchPresets = presets
 
         let preset = presets[index]
-        let configMsg = "GB({\"app\":\"dw\",\"t\":\"s_c\",\"p\":\(index),\"n\":\"\(preset.name)\",\"rh\":\(preset.hapOnReading ? 1 : 0),\"rw\":\(preset.wakeOnReading ? 1 : 0),\"od\":\(preset.od),\"nd\":\(preset.nd),\"st\":\(preset.st.rawValue),\"dt\":\(preset.dt.rawValue),\"lt\":\(preset.lt.rawValue)})\r\n"
+        let configMsg = "GB({\"app\":\"dw\",\"t\":\"s_c\",\"p\":\(index),\"n\":\"\(preset.name)\",\"rw\":\(preset.wakeOnReading ? 1 : 0),\"od\":\(preset.od),\"nd\":\(preset.nd),\"st\":\(preset.st.rawValue),\"dt\":\(preset.dt.rawValue),\"lt\":\(preset.lt.rawValue)})\r\n"
 
         log.default("Sending DiaWatch preset %{public}d general config", index)
         beginTransmission(configMsg) { [weak self] in
@@ -314,7 +316,6 @@ final class DiaWatchManager: NSObject, ObservableObject {
     func addPreset() {
         let newPreset = Preset(
             name: "Preset \(presets.count)",
-            hapOnReading: false,
             wakeOnReading: false,
             hapticAlerts: HapticAlert.defaults
         )
