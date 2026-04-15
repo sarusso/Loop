@@ -36,7 +36,7 @@ struct DiaWatchSettingsView: View {
     @State private var deletePresetStatus: ButtonStatus? = nil
     @State private var showUnsavedChangesAlert = false
     @State private var showTabChangeAlert = false
-    @State private var showNewModeSaveAlert = false
+    @State private var showNewPresetSaveAlert = false
     @State private var pendingTabSwitch: ConfigTab? = nil
     @State private var pendingPresetSwitch: Int = 0
     @State private var pendingDismiss = false
@@ -139,7 +139,7 @@ struct DiaWatchSettingsView: View {
                 pendingAddPreset = false
             }
         } message: {
-            Text("The mode \"\(manager.presets[selectedPresetIndex].name)\" has unsaved changes. Discard them?")
+            Text("The preset \"\(manager.presets[selectedPresetIndex].name)\" has unsaved changes. Discard them?")
         }
         .alert("Unsaved Changes", isPresented: $showTabChangeAlert) {
             Button("Save", role: .none) {
@@ -181,12 +181,12 @@ struct DiaWatchSettingsView: View {
         } message: {
             Text("Save changes to \(configTab.rawValue.lowercased()) before switching?")
         }
-        .alert("Save Required", isPresented: $showNewModeSaveAlert) {
+        .alert("Save Required", isPresented: $showNewPresetSaveAlert) {
             Button("OK", role: .cancel) {
                 pendingTabSwitch = nil
             }
         } message: {
-            Text("Save this new mode before switching tabs.")
+            Text("Save this new preset before switching tabs.")
         }
         .onChange(of: manager.pushPhase) { phase in
             guard phase == .idle else { return }
@@ -418,7 +418,7 @@ struct DiaWatchSettingsView: View {
     }
 
     private var configurationSection: some View {
-        Section(header: Text("Modes")) {
+        Section(header: Text("Presets")) {
             HStack {
                 Picker("", selection: Binding(
                     get: { selectedPresetIndex },
@@ -484,10 +484,10 @@ struct DiaWatchSettingsView: View {
                 get: { configTab },
                 set: { newTab in
                     guard newTab != configTab else { return }
-                    let isNewMode = selectedPresetIndex >= UserDefaults.standard.diaWatchPresets.count
-                    if isNewMode {
+                    let isNewPreset = selectedPresetIndex >= UserDefaults.standard.diaWatchPresets.count
+                    if isNewPreset {
                         pendingTabSwitch = newTab
-                        showNewModeSaveAlert = true
+                        showNewPresetSaveAlert = true
                     } else if currentTabDirty {
                         pendingTabSwitch = newTab
                         showTabChangeAlert = true
@@ -535,7 +535,7 @@ struct DiaWatchSettingsView: View {
         HStack {
             Text("Name")
             Spacer()
-            TextField("mode name", text: Binding(
+            TextField("preset name", text: Binding(
                 get: { manager.presets[selectedPresetIndex].name },
                 set: { manager.presets[selectedPresetIndex].name = $0 }
             ))

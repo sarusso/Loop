@@ -251,7 +251,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let bhJSON = "[" + preset.bandHaptics.map { "\"\($0)\"" }.joined(separator: ",") + "]"
         let bandsMsg = "GB({\"app\":\"dw\",\"t\":\"s_b\",\"p\":\(index),\"bc\":\(bcJSON),\"bh\":\(bhJSON)})\r\n"
 
-        log.default("Sending DiaWatch mode %{public}d bands", index)
+        log.default("Sending DiaWatch preset %{public}d bands", index)
         beginTransmission(bandsMsg) { [weak self] in
             guard let self else { return }
             if self.receivedResponse {
@@ -259,7 +259,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
             } else {
                 self.lastPushError = "No response from watch"
             }
-            self.log.default("DiaWatch mode %{public}d bands saved", index)
+            self.log.default("DiaWatch preset %{public}d bands saved", index)
         }
     }
 
@@ -271,15 +271,15 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let preset = presets[index]
         let configMsg = "GB({\"app\":\"dw\",\"t\":\"s_c\",\"p\":\(index),\"n\":\"\(preset.name)\",\"rh\":\(preset.hapOnReading ? 1 : 0),\"rw\":\(preset.wakeOnReading ? 1 : 0),\"od\":\(preset.od),\"nd\":\(preset.nd),\"st\":\(preset.st.rawValue),\"dt\":\(preset.dt.rawValue),\"lt\":\(preset.lt.rawValue)})\r\n"
 
-        log.default("Sending DiaWatch mode %{public}d general config", index)
+        log.default("Sending DiaWatch preset %{public}d general config", index)
         beginTransmission(configMsg) { [weak self] in
             guard let self else { return }
             if self.receivedResponse {
-                self.lastPushError = self.bleResponse.contains("ERROR") ? "Watch rejected mode config" : nil
+                self.lastPushError = self.bleResponse.contains("ERROR") ? "Watch rejected preset config" : nil
             } else {
                 self.lastPushError = "No response from watch"
             }
-            self.log.default("DiaWatch mode %{public}d general config saved", index)
+            self.log.default("DiaWatch preset %{public}d general config saved", index)
         }
     }
 
@@ -303,17 +303,17 @@ final class DiaWatchManager: NSObject, ObservableObject {
             } else {
                 self.lastPushError = "No response from watch"
             }
-            self.log.default("DiaWatch mode %{public}d alerts saved", index)
+            self.log.default("DiaWatch preset %{public}d alerts saved", index)
         }
 
         transmissionQueue = Array(commands.dropFirst())
-        log.default("Sending DiaWatch mode %{public}d alerts", index)
+        log.default("Sending DiaWatch preset %{public}d alerts", index)
         beginTransmission(commands[0].0, onComplete: commands[0].1)
     }
 
     func addPreset() {
         let newPreset = Preset(
-            name: "Mode \(presets.count)",
+            name: "Preset \(presets.count)",
             hapOnReading: false,
             wakeOnReading: false,
             hapticAlerts: HapticAlert.defaults
