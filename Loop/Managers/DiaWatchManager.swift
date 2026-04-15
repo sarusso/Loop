@@ -16,9 +16,9 @@ final class DiaWatchManager: NSObject, ObservableObject {
     static let nusRXCharUUID  = CBUUID(string: "6e400002-b5a3-f393-e0a9-e50e24dcca9e")
     static let nusTXCharUUID  = CBUUID(string: "6e400003-b5a3-f393-e0a9-e50e24dcca9e")
 
-    // MARK: - Haptic slot model
+    // MARK: - Haptic alert model
 
-    struct HapticSlot: Codable, Equatable {
+    struct HapticAlert: Codable, Equatable {
         var enabled: Bool
         var op: String      // ">" or "<"
         var thr: Int        // glucose threshold in mg/dL
@@ -31,8 +31,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
             "stutter", "sos", "fanfare", "uprising_sweep"
         ]
 
-        static let defaults: [HapticSlot] = (0..<5).map { _ in
-            HapticSlot(enabled: false, op: ">", thr: 180, pat: "single_buzz")
+        static let defaults: [HapticAlert] = (0..<5).map { _ in
+            HapticAlert(enabled: false, op: ">", thr: 180, pat: "single_buzz")
         }
     }
 
@@ -63,7 +63,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         var lt: TapAction    // long tap action
         var bandCutoffs: [Int]      // 4 ascending glucose cutoffs in mg/dL
         var bandHaptics: [String]   // 5 haptic patterns, one per band
-        var hapticSlots: [HapticSlot]
+        var hapticAlerts: [HapticAlert]
 
         static let defaultBandCutoffs: [Int] = [70, 100, 200, 300]
         static let defaultBandHaptics: [String] = [
@@ -81,10 +81,10 @@ final class DiaWatchManager: NSObject, ObservableObject {
             lt: .haptics,
             bandCutoffs: defaultBandCutoffs,
             bandHaptics: defaultBandHaptics,
-            hapticSlots: HapticSlot.defaults
+            hapticAlerts: HapticAlert.defaults
         )
 
-        init(name: String, hapOnReading: Bool, wakeOnReading: Bool, od: Int = 10, nd: Int = 30, st: TapAction = .nothing, dt: TapAction = .wake, lt: TapAction = .haptics, bandCutoffs: [Int] = Preset.defaultBandCutoffs, bandHaptics: [String] = Preset.defaultBandHaptics, hapticSlots: [HapticSlot]) {
+        init(name: String, hapOnReading: Bool, wakeOnReading: Bool, od: Int = 10, nd: Int = 30, st: TapAction = .nothing, dt: TapAction = .wake, lt: TapAction = .haptics, bandCutoffs: [Int] = Preset.defaultBandCutoffs, bandHaptics: [String] = Preset.defaultBandHaptics, hapticAlerts: [HapticAlert]) {
             self.name = name
             self.hapOnReading = hapOnReading
             self.wakeOnReading = wakeOnReading
@@ -95,7 +95,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
             self.lt = lt
             self.bandCutoffs = bandCutoffs
             self.bandHaptics = bandHaptics
-            self.hapticSlots = hapticSlots
+            self.hapticAlerts = hapticAlerts
         }
 
         init(from decoder: Decoder) throws {
@@ -110,7 +110,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
             lt = try c.decodeIfPresent(TapAction.self, forKey: .lt) ?? .haptics
             bandCutoffs = try c.decodeIfPresent([Int].self, forKey: .bandCutoffs) ?? Preset.defaultBandCutoffs
             bandHaptics = try c.decodeIfPresent([String].self, forKey: .bandHaptics) ?? Preset.defaultBandHaptics
-            hapticSlots = try c.decode([HapticSlot].self, forKey: .hapticSlots)
+            hapticAlerts = try c.decode([HapticAlert].self, forKey: .hapticAlerts)
         }
     }
 
@@ -283,31 +283,31 @@ final class DiaWatchManager: NSObject, ObservableObject {
         }
     }
 
-    func saveSlots(at index: Int) {
+    func saveAlerts(at index: Int) {
         guard !isSending, index < presets.count else { return }
 
         UserDefaults.standard.diaWatchPresets = presets
 
         let preset = presets[index]
-        var commands: [(String, (() -> Void)?)] = preset.hapticSlots.enumerated().map { slotIdx, slot in
-            let msg = slot.enabled
-                ? "GB({\"app\":\"dw\",\"t\":\"s_h\",\"p\":\(index),\"idx\":\(slotIdx),\"op\":\"\(slot.op)\",\"thr\":\(slot.thr),\"pat\":\"\(slot.pat)\"})\r\n"
-                : "GB({\"app\":\"dw\",\"t\":\"d_h\",\"p\":\(index),\"idx\":\(slotIdx)})\r\n"
+        var commands: [(String, (() -> Void)?)] = preset.hapticAlerts.enumerated().map { alertIdx, alert in
+            let msg = alert.enabled
+                ? "GB({\"app\":\"dw\",\"t\":\"s_a\",\"p\":\(index),\"idx\":\(alertIdx),\"op\":\"\(alert.op)\",\"thr\":\(alert.thr),\"pat\":\"\(alert.pat)\"})\r\n"
+                : "GB({\"app\":\"dw\",\"t\":\"d_a\",\"p\":\(index),\"idx\":\(alertIdx)})\r\n"
             return (msg, nil)
         }
 
         commands[commands.count - 1].1 = { [weak self] in
             guard let self else { return }
             if self.receivedResponse {
-                self.lastPushError = self.bleResponse.contains("ERROR") ? "Watch rejected slot config" : nil
+                self.lastPushError = self.bleResponse.contains("ERROR") ? "Watch rejected alert config" : nil
             } else {
                 self.lastPushError = "No response from watch"
             }
-            self.log.default("DiaWatch mode %{public}d slots saved", index)
+            self.log.default("DiaWatch mode %{public}d alerts saved", index)
         }
 
         transmissionQueue = Array(commands.dropFirst())
-        log.default("Sending DiaWatch mode %{public}d slots", index)
+        log.default("Sending DiaWatch mode %{public}d alerts", index)
         beginTransmission(commands[0].0, onComplete: commands[0].1)
     }
 
@@ -316,7 +316,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
             name: "Mode \(presets.count)",
             hapOnReading: false,
             wakeOnReading: false,
-            hapticSlots: HapticSlot.defaults
+            hapticAlerts: HapticAlert.defaults
         )
         presets.append(newPreset)
     }

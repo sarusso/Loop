@@ -16,13 +16,13 @@ struct DiaWatchSettingsView: View {
     @State private var selectedPresetIndex: Int = 0
     @State private var presetDirty = false
 
-    private enum ConfigTab: String, CaseIterable { case general = "General", bands = "Bands", slots = "Slots" }
+    private enum ConfigTab: String, CaseIterable { case general = "General", bands = "Bands", alerts = "Alerts" }
     @State private var configTab: ConfigTab = .general
     @State private var generalDirty = false
-    @State private var slotsDirty = false
+    @State private var alertsDirty = false
     @State private var bandsDirty = false
 
-    private enum ActiveButton { case none, test, saveGeneral, saveSlots, saveBands, activatePreset, deletePreset, testHaptic, customCommand, setTime, battery, freeMem, uptime }
+    private enum ActiveButton { case none, test, saveGeneral, saveAlerts, saveBands, activatePreset, deletePreset, testHaptic, customCommand, setTime, battery, freeMem, uptime }
     @State private var activeButton: ActiveButton = .none
 
     struct ButtonStatus {
@@ -30,7 +30,7 @@ struct DiaWatchSettingsView: View {
         var isError: Bool
     }
     @State private var saveGeneralStatus: ButtonStatus? = nil
-    @State private var saveSlotsStatus: ButtonStatus? = nil
+    @State private var saveAlertsStatus: ButtonStatus? = nil
     @State private var saveBandsStatus: ButtonStatus? = nil
     @State private var activatePresetStatus: ButtonStatus? = nil
     @State private var deletePresetStatus: ButtonStatus? = nil
@@ -44,7 +44,7 @@ struct DiaWatchSettingsView: View {
     @State private var suppressDirty = false
     @State private var testStatus: ButtonStatus? = nil
     @State private var testHapticStatus: ButtonStatus? = nil
-    @State private var selectedHapticPattern: String = DiaWatchManager.HapticSlot.allPatterns[0]
+    @State private var selectedHapticPattern: String = DiaWatchManager.HapticAlert.allPatterns[0]
     @State private var customCommandStatus: ButtonStatus? = nil
     @State private var customCommandText: String = ""
     @State private var setTimeStatus: ButtonStatus? = nil
@@ -104,7 +104,7 @@ struct DiaWatchSettingsView: View {
                 || current.st != saved.st
                 || current.dt != saved.dt
                 || current.lt != saved.lt
-            slotsDirty = current.hapticSlots != saved.hapticSlots
+            alertsDirty = current.hapticAlerts != saved.hapticAlerts
             bandsDirty = current.bandCutoffs != saved.bandCutoffs
                 || current.bandHaptics != saved.bandHaptics
         }
@@ -119,7 +119,7 @@ struct DiaWatchSettingsView: View {
                     selectedPresetIndex = max(0, manager.presets.count - 1)
                 }
                 generalDirty = false
-                slotsDirty = false
+                alertsDirty = false
                 bandsDirty = false
                 if pendingDismiss {
                     pendingDismiss = false
@@ -148,9 +148,9 @@ struct DiaWatchSettingsView: View {
                     case .general:
                         activeButton = .saveGeneral
                         manager.saveGeneralConfig(at: selectedPresetIndex)
-                    case .slots:
-                        activeButton = .saveSlots
-                        manager.saveSlots(at: selectedPresetIndex)
+                    case .alerts:
+                        activeButton = .saveAlerts
+                        manager.saveAlerts(at: selectedPresetIndex)
                     case .bands:
                         activeButton = .saveBands
                         manager.saveBands(at: selectedPresetIndex)
@@ -168,7 +168,7 @@ struct DiaWatchSettingsView: View {
                     }
                     switch configTab {
                     case .general: generalDirty = false
-                    case .slots:   slotsDirty = false
+                    case .alerts:   alertsDirty = false
                     case .bands:     bandsDirty = false
                     }
                     configTab = tab
@@ -199,7 +199,7 @@ struct DiaWatchSettingsView: View {
             switch which {
             case .test:          text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
             case .saveGeneral:   text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
-            case .saveSlots:     text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
+            case .saveAlerts:     text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
             case .saveBands:     text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
             case .activatePreset: text = isError ? (manager.lastPushError ?? "Failed") : "Activated!"
             case .deletePreset:   text = isError ? (manager.lastPushError ?? "Failed") : "Deleted!"
@@ -221,10 +221,10 @@ struct DiaWatchSettingsView: View {
                 saveGeneralStatus = status
                 if !isError { generalDirty = false }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { saveGeneralStatus = nil }
-            case .saveSlots:
-                saveSlotsStatus = status
-                if !isError { slotsDirty = false }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { saveSlotsStatus = nil }
+            case .saveAlerts:
+                saveAlertsStatus = status
+                if !isError { alertsDirty = false }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { saveAlertsStatus = nil }
             case .saveBands:
                 saveBandsStatus = status
                 if !isError { bandsDirty = false }
@@ -392,11 +392,11 @@ struct DiaWatchSettingsView: View {
 
     // MARK: - Configuration
 
-    private var anyDirty: Bool { generalDirty || slotsDirty || bandsDirty }
+    private var anyDirty: Bool { generalDirty || alertsDirty || bandsDirty }
     private var currentTabDirty: Bool {
         switch configTab {
         case .general: return generalDirty
-        case .slots:   return slotsDirty
+        case .alerts:   return alertsDirty
         case .bands:     return bandsDirty
         }
     }
@@ -404,7 +404,7 @@ struct DiaWatchSettingsView: View {
     private func currentTabSaveStatus() -> ButtonStatus? {
         switch configTab {
         case .general: return saveGeneralStatus
-        case .slots:   return saveSlotsStatus
+        case .alerts:   return saveAlertsStatus
         case .bands:     return saveBandsStatus
         }
     }
@@ -412,7 +412,7 @@ struct DiaWatchSettingsView: View {
     private func currentTabSaveButtonId() -> ActiveButton {
         switch configTab {
         case .general: return .saveGeneral
-        case .slots:   return .saveSlots
+        case .alerts:   return .saveAlerts
         case .bands:     return .saveBands
         }
     }
@@ -504,7 +504,7 @@ struct DiaWatchSettingsView: View {
 
             switch configTab {
             case .general: generalTabContent
-            case .slots:   slotsTabContent
+            case .alerts:   alertsTabContent
             case .bands:     bandsTabContent
             }
 
@@ -519,9 +519,9 @@ struct DiaWatchSettingsView: View {
                 case .general:
                     activeButton = .saveGeneral
                     manager.saveGeneralConfig(at: selectedPresetIndex)
-                case .slots:
-                    activeButton = .saveSlots
-                    manager.saveSlots(at: selectedPresetIndex)
+                case .alerts:
+                    activeButton = .saveAlerts
+                    manager.saveAlerts(at: selectedPresetIndex)
                 case .bands:
                     activeButton = .saveBands
                     manager.saveBands(at: selectedPresetIndex)
@@ -591,9 +591,9 @@ struct DiaWatchSettingsView: View {
     }
 
     @ViewBuilder
-    private var slotsTabContent: some View {
-        ForEach(manager.presets[selectedPresetIndex].hapticSlots.indices, id: \.self) { idx in
-            hapticSlotRow(slotIdx: idx)
+    private var alertsTabContent: some View {
+        ForEach(manager.presets[selectedPresetIndex].hapticAlerts.indices, id: \.self) { idx in
+            hapticAlertRow(alertIdx: idx)
         }
     }
 
@@ -621,7 +621,7 @@ struct DiaWatchSettingsView: View {
                     get: { manager.presets[selectedPresetIndex].bandHaptics[bandIdx] },
                     set: { manager.presets[selectedPresetIndex].bandHaptics[bandIdx] = $0 }
                 )) {
-                    ForEach(DiaWatchManager.HapticSlot.allPatterns, id: \.self) { pat in
+                    ForEach(DiaWatchManager.HapticAlert.allPatterns, id: \.self) { pat in
                         Text(Self.formatPattern(pat)).tag(pat)
                     }
                 }
@@ -650,18 +650,18 @@ struct DiaWatchSettingsView: View {
     }
 
     @ViewBuilder
-    private func hapticSlotRow(slotIdx: Int) -> some View {
-        let slot = manager.presets[selectedPresetIndex].hapticSlots[slotIdx]
+    private func hapticAlertRow(alertIdx: Int) -> some View {
+        let alert = manager.presets[selectedPresetIndex].hapticAlerts[alertIdx]
         VStack(alignment: .leading, spacing: 6) {
-            Toggle("Haptic slot \(slotIdx + 1)", isOn: Binding(
-                get: { manager.presets[selectedPresetIndex].hapticSlots[slotIdx].enabled },
-                set: { manager.presets[selectedPresetIndex].hapticSlots[slotIdx].enabled = $0 }
+            Toggle("Alert \(alertIdx + 1)", isOn: Binding(
+                get: { manager.presets[selectedPresetIndex].hapticAlerts[alertIdx].enabled },
+                set: { manager.presets[selectedPresetIndex].hapticAlerts[alertIdx].enabled = $0 }
             ))
-            if slot.enabled {
+            if alert.enabled {
                 HStack(spacing: 12) {
                     Picker("", selection: Binding(
-                        get: { manager.presets[selectedPresetIndex].hapticSlots[slotIdx].op },
-                        set: { manager.presets[selectedPresetIndex].hapticSlots[slotIdx].op = $0 }
+                        get: { manager.presets[selectedPresetIndex].hapticAlerts[alertIdx].op },
+                        set: { manager.presets[selectedPresetIndex].hapticAlerts[alertIdx].op = $0 }
                     )) {
                         Text("Above").tag(">")
                         Text("Below").tag("<")
@@ -670,21 +670,21 @@ struct DiaWatchSettingsView: View {
                     .frame(maxWidth: 130)
 
                     Stepper(
-                        "\(manager.presets[selectedPresetIndex].hapticSlots[slotIdx].thr) mg/dL",
+                        "\(manager.presets[selectedPresetIndex].hapticAlerts[alertIdx].thr) mg/dL",
                         value: Binding(
-                            get: { manager.presets[selectedPresetIndex].hapticSlots[slotIdx].thr },
-                            set: { manager.presets[selectedPresetIndex].hapticSlots[slotIdx].thr = $0 }
+                            get: { manager.presets[selectedPresetIndex].hapticAlerts[alertIdx].thr },
+                            set: { manager.presets[selectedPresetIndex].hapticAlerts[alertIdx].thr = $0 }
                         ),
                         in: 40...400,
                         step: 10
                     )
                 }
 
-                Picker("Pattern", selection: Binding(
-                    get: { manager.presets[selectedPresetIndex].hapticSlots[slotIdx].pat },
-                    set: { manager.presets[selectedPresetIndex].hapticSlots[slotIdx].pat = $0 }
+                Picker("Haptic", selection: Binding(
+                    get: { manager.presets[selectedPresetIndex].hapticAlerts[alertIdx].pat },
+                    set: { manager.presets[selectedPresetIndex].hapticAlerts[alertIdx].pat = $0 }
                 )) {
-                    ForEach(DiaWatchManager.HapticSlot.allPatterns, id: \.self) { pat in
+                    ForEach(DiaWatchManager.HapticAlert.allPatterns, id: \.self) { pat in
                         Text(Self.formatPattern(pat)).tag(pat)
                     }
                 }
@@ -701,7 +701,7 @@ struct DiaWatchSettingsView: View {
             footer: Text("Sends a MicroPython command to the watch to play the selected pattern immediately.")
         ) {
             Picker("Pattern", selection: $selectedHapticPattern) {
-                ForEach(DiaWatchManager.HapticSlot.allPatterns, id: \.self) { pat in
+                ForEach(DiaWatchManager.HapticAlert.allPatterns, id: \.self) { pat in
                     Text(Self.formatPattern(pat)).tag(pat)
                 }
             }
