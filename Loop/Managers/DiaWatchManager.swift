@@ -404,6 +404,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
     private func beginTransmission(_ message: String, onComplete: (() -> Void)? = nil, withPreamble: Bool = false) {
         guard !isSending else {
             if transmissionsEnabled {
+                log.default("DiaWatch enqueue (busy) [%{public}d bytes]: %{public}@", message.utf8.count, message)
                 transmissionQueue.append((message: message, onComplete: onComplete))
             }
             return
@@ -416,6 +417,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
         guard let msgData = message.data(using: .utf8) else { return }
 
+        log.default("DiaWatch TX [%{public}d bytes]: %{public}@", message.utf8.count, message)
+
         currentTransmissionMessage = message
         pendingCommandEcho = message.trimmingCharacters(in: .whitespacesAndNewlines)
         echoDetected = false
@@ -424,6 +427,11 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let data = withPreamble ? Data([0x03, 0x03]) + msgData : msgData
         pendingChunks = stride(from: 0, to: data.count, by: 20).map {
             Data(data[$0 ..< min($0 + 20, data.count)])
+        }
+        for (i, chunk) in pendingChunks.enumerated() {
+            let asString = String(data: chunk, encoding: .utf8) ?? chunk.map { String(format: "%02x", $0) }.joined()
+            log.default("DiaWatch TX chunk %{public}d/%{public}d (%{public}d bytes): %{public}@",
+                        i + 1, pendingChunks.count, chunk.count, asString)
         }
 
         isSending = true
@@ -595,14 +603,12 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
         if pushPhase != .sending { pushPhase = .sending }
 
-        guard p.canSendWriteWithoutResponse else {
-            // Flow-control: peripheralIsReady(toSendWriteWithoutResponse:) will resume us
-            return
-        }
-
         let chunk = pendingChunks.removeFirst()
-        p.writeValue(chunk, for: rx, type: .withoutResponse)
-        writeNextChunk()
+        // .withResponse: BLE link-layer ACKs each chunk before the next is sent,
+        // pacing writes to whatever rate the watch can sustain — protects the
+        // wasp-os RX buffer from overflow. Next chunk is sent from
+        // peripheral(_:didWriteValueFor:error:) below.
+        p.writeValue(chunk, for: rx, type: .withResponse)
     }
 
     // MARK: - Preview support
@@ -760,6 +766,14 @@ extension DiaWatchManager: CBPeripheralDelegate {
     }
 
     func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
+        // No-op — we now use .withResponse writes paced by didWriteValueFor.
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+        if let error = error {
+            log.error("DiaWatch chunk write failed: %{public}@", error.localizedDescription)
+            // Continue anyway — failures here are surfaced by the send timeout / response handling
+        }
         writeNextChunk()
     }
 
