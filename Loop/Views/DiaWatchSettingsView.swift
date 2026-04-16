@@ -504,6 +504,9 @@ struct DiaWatchSettingsView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .padding(.top, 4)
+            .padding(.bottom, 2)
+            .listRowSeparator(.hidden, edges: .bottom)
 
             switch configTab {
             case .general: generalTabContent
@@ -549,7 +552,11 @@ struct DiaWatchSettingsView: View {
             .onSubmit { presetNameFocused = false }
         }
 
-        Toggle("Wake screen on new reading", isOn: Binding(
+        tapActionPicker(label: "Single tap", keyPath: \.st)
+        tapActionPicker(label: "Double tap", keyPath: \.dt)
+        tapActionPicker(label: "Long tap", keyPath: \.lt)
+
+        Toggle("Wake screen on new readings", isOn: Binding(
             get: { manager.presets[selectedPresetIndex].wakeOnReading },
             set: { manager.presets[selectedPresetIndex].wakeOnReading = $0 }
         ))
@@ -573,10 +580,6 @@ struct DiaWatchSettingsView: View {
             in: 10...120,
             step: 5
         )
-
-        tapActionPicker(label: "Single tap", keyPath: \.st)
-        tapActionPicker(label: "Double tap", keyPath: \.dt)
-        tapActionPicker(label: "Long tap", keyPath: \.lt)
     }
 
     @ViewBuilder
@@ -602,6 +605,22 @@ struct DiaWatchSettingsView: View {
 
     private static let rangeLabels = ["Very Low", "Low", "OK", "High", "Very High"]
 
+    private static func hex(_ rgb: UInt32) -> Color {
+        Color(
+            red:   Double((rgb >> 16) & 0xFF) / 255,
+            green: Double((rgb >>  8) & 0xFF) / 255,
+            blue:  Double(rgb         & 0xFF) / 255
+        )
+    }
+
+    private static let rangeColors: [Color] = [
+        hex(0xFB5951),  // Very Low
+        hex(0xFF8B7C),  // Low
+        hex(0x76D3A6),  // OK
+        hex(0xBB9AE7),  // High
+        hex(0x8C65D6)   // Very High
+    ]
+
     @ViewBuilder
     private var rangesTabContent: some View {
         ForEach(0..<5, id: \.self) { rangeIdx in
@@ -615,7 +634,8 @@ struct DiaWatchSettingsView: View {
     @ViewBuilder
     private func rangeRow(rangeIdx: Int) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(Self.rangeLabels[rangeIdx]).fontWeight(.medium)
+            Text(Self.rangeLabels[rangeIdx])
+                .fontWeight(.bold)
             HStack {
                 Text("Haptic:")
                 Picker("", selection: Binding(
@@ -628,7 +648,7 @@ struct DiaWatchSettingsView: View {
                 }
                 .labelsHidden()
             }
-            Toggle("Play on new reading", isOn: Binding(
+            Toggle("Play on new readings", isOn: Binding(
                 get: { manager.presets[selectedPresetIndex].rangePlayHaptic[rangeIdx] },
                 set: { manager.presets[selectedPresetIndex].rangePlayHaptic[rangeIdx] = $0 }
             ))
@@ -652,6 +672,15 @@ struct DiaWatchSettingsView: View {
             step: 5
         )
         .font(.caption)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Self.hex(0xFFF7E5))
+        )
+        .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
+        .listRowBackground(Color(UIColor.secondarySystemGroupedBackground))
+        .listRowSeparator(.hidden)
     }
 
     @ViewBuilder
