@@ -101,6 +101,9 @@ struct DiaWatchSettingsView: View {
             let current = manager.presets[selectedPresetIndex]
             generalDirty = current.name != saved.name
                 || current.wakeOnReading != saved.wakeOnReading
+                || current.displayBrightness != saved.displayBrightness
+                || current.displayAlwaysOn != saved.displayAlwaysOn
+                || current.displaySleepSec != saved.displaySleepSec
                 || current.od != saved.od
                 || current.nd != saved.nd
                 || current.st != saved.st
@@ -549,14 +552,41 @@ struct DiaWatchSettingsView: View {
             .onSubmit { presetNameFocused = false }
         }
 
+        Picker("Display brightness", selection: Binding(
+            get: { manager.presets[selectedPresetIndex].displayBrightness },
+            set: { manager.presets[selectedPresetIndex].displayBrightness = $0 }
+        )) {
+            Text("Low").tag(1)
+            Text("Mid").tag(2)
+            Text("High").tag(3)
+        }
+        .pickerStyle(.menu)
+
+        Toggle("Display always on", isOn: Binding(
+            get: { manager.presets[selectedPresetIndex].displayAlwaysOn },
+            set: { manager.presets[selectedPresetIndex].displayAlwaysOn = $0 }
+        ))
+
+        if !manager.presets[selectedPresetIndex].displayAlwaysOn {
+            Stepper(
+                "Display sleep: \(manager.presets[selectedPresetIndex].displaySleepSec) sec",
+                value: Binding(
+                    get: { manager.presets[selectedPresetIndex].displaySleepSec },
+                    set: { manager.presets[selectedPresetIndex].displaySleepSec = $0 }
+                ),
+                in: 1...3600,
+                step: 1
+            )
+
+            Toggle("Display wakes on new readings", isOn: Binding(
+                get: { manager.presets[selectedPresetIndex].wakeOnReading },
+                set: { manager.presets[selectedPresetIndex].wakeOnReading = $0 }
+            ))
+        }
+
         tapActionPicker(label: "Single tap", keyPath: \.st)
         tapActionPicker(label: "Double tap", keyPath: \.dt)
         tapActionPicker(label: "Long tap", keyPath: \.lt)
-
-        Toggle("Wake screen on new readings", isOn: Binding(
-            get: { manager.presets[selectedPresetIndex].wakeOnReading },
-            set: { manager.presets[selectedPresetIndex].wakeOnReading = $0 }
-        ))
 
         Stepper(
             "Outdated data: \(manager.presets[selectedPresetIndex].od) min",
