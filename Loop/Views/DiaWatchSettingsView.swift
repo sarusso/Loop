@@ -104,6 +104,7 @@ struct DiaWatchSettingsView: View {
                 || current.displayBrightness != saved.displayBrightness
                 || current.displayAlwaysOn != saved.displayAlwaysOn
                 || current.displaySleepSec != saved.displaySleepSec
+                || current.forecaster != saved.forecaster
                 || current.od != saved.od
                 || current.nd != saved.nd
                 || current.st != saved.st
@@ -574,6 +575,16 @@ struct DiaWatchSettingsView: View {
         tapActionPicker(label: "Single tap", keyPath: \.st)
         tapActionPicker(label: "Double tap", keyPath: \.dt)
         tapActionPicker(label: "Long tap", keyPath: \.lt)
+
+        Picker("Forecaster", selection: Binding(
+            get: { manager.presets[selectedPresetIndex].forecaster },
+            set: { manager.presets[selectedPresetIndex].forecaster = $0 }
+        )) {
+            ForEach(DiaWatchManager.Forecaster.allCases, id: \.self) { f in
+                Text(f.label).tag(f)
+            }
+        }
+        .pickerStyle(.menu)
 
         Stepper(
             "Outdated data: \(manager.presets[selectedPresetIndex].od) min",

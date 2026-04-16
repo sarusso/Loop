@@ -38,6 +38,18 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
     // MARK: - Preset model
 
+    enum Forecaster: String, Codable, CaseIterable {
+        case none
+        case projection = "Projection"
+
+        var label: String {
+            switch self {
+            case .none:       return "None"
+            case .projection: return "Projection"
+            }
+        }
+    }
+
     enum TapAction: Int, Codable, CaseIterable {
         case nothing = 0
         case wake = 1
@@ -58,6 +70,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         var displayBrightness: Int   // 1, 2, 3
         var displayAlwaysOn: Bool    // when true, ds is emitted as null
         var displaySleepSec: Int     // seconds; only meaningful when !displayAlwaysOn
+        var forecaster: Forecaster
         var od: Int      // outdated data threshold in minutes
         var nd: Int      // no data threshold in minutes
         var st: TapAction    // single tap action
@@ -80,6 +93,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
             displayBrightness: 2,
             displayAlwaysOn: false,
             displaySleepSec: 10,
+            forecaster: .none,
             od: 10,
             nd: 30,
             st: .nothing,
@@ -91,12 +105,13 @@ final class DiaWatchManager: NSObject, ObservableObject {
             hapticAlerts: HapticAlert.defaults
         )
 
-        init(name: String, wakeOnReading: Bool, displayBrightness: Int = 2, displayAlwaysOn: Bool = false, displaySleepSec: Int = 10, od: Int = 10, nd: Int = 30, st: TapAction = .nothing, dt: TapAction = .wake, lt: TapAction = .haptics, rangeCutoffs: [Int] = Preset.defaultRangeCutoffs, rangeHaptics: [String] = Preset.defaultRangeHaptics, rangePlayHaptic: [Bool] = Preset.defaultRangePlayHaptic, hapticAlerts: [HapticAlert]) {
+        init(name: String, wakeOnReading: Bool, displayBrightness: Int = 2, displayAlwaysOn: Bool = false, displaySleepSec: Int = 10, forecaster: Forecaster = .projection, od: Int = 10, nd: Int = 30, st: TapAction = .nothing, dt: TapAction = .wake, lt: TapAction = .haptics, rangeCutoffs: [Int] = Preset.defaultRangeCutoffs, rangeHaptics: [String] = Preset.defaultRangeHaptics, rangePlayHaptic: [Bool] = Preset.defaultRangePlayHaptic, hapticAlerts: [HapticAlert]) {
             self.name = name
             self.wakeOnReading = wakeOnReading
             self.displayBrightness = displayBrightness
             self.displayAlwaysOn = displayAlwaysOn
             self.displaySleepSec = displaySleepSec
+            self.forecaster = forecaster
             self.od = od
             self.nd = nd
             self.st = st
@@ -115,6 +130,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
             displayBrightness = try c.decodeIfPresent(Int.self, forKey: .displayBrightness) ?? 2
             displayAlwaysOn = try c.decodeIfPresent(Bool.self, forKey: .displayAlwaysOn) ?? false
             displaySleepSec = try c.decodeIfPresent(Int.self, forKey: .displaySleepSec) ?? 10
+            forecaster = try c.decodeIfPresent(Forecaster.self, forKey: .forecaster) ?? .none
             od = try c.decodeIfPresent(Int.self, forKey: .od) ?? 10
             nd = try c.decodeIfPresent(Int.self, forKey: .nd) ?? 30
             st = try c.decodeIfPresent(TapAction.self, forKey: .st) ?? .nothing
@@ -287,7 +303,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
         let preset = presets[index]
         let dsValue = preset.displayAlwaysOn ? "null" : "\(preset.displaySleepSec)"
-        let configMsg = "GB({\"app\":\"dw\",\"t\":\"s_c\",\"p\":\(index),\"n\":\"\(preset.name)\",\"rw\":\(preset.wakeOnReading ? 1 : 0),\"db\":\(preset.displayBrightness),\"ds\":\(dsValue),\"od\":\(preset.od),\"nd\":\(preset.nd),\"st\":\(preset.st.rawValue),\"dt\":\(preset.dt.rawValue),\"lt\":\(preset.lt.rawValue)})\r\n"
+        let fcValue = preset.forecaster == .none ? "null" : "\"\(preset.forecaster.rawValue)\""
+        let configMsg = "GB({\"app\":\"dw\",\"t\":\"s_c\",\"p\":\(index),\"n\":\"\(preset.name)\",\"rw\":\(preset.wakeOnReading ? 1 : 0),\"db\":\(preset.displayBrightness),\"ds\":\(dsValue),\"fc\":\(fcValue),\"od\":\(preset.od),\"nd\":\(preset.nd),\"st\":\(preset.st.rawValue),\"dt\":\(preset.dt.rawValue),\"lt\":\(preset.lt.rawValue)})\r\n"
 
         log.default("Sending DiaWatch preset %{public}d general config", index)
         beginTransmission(configMsg) { [weak self] in
