@@ -326,20 +326,7 @@ struct DiaWatchSettingsView: View {
                     status: setTimeStatus
                 ) {
                     activeButton = .setTime
-                    let now = Date()
-                    var cal = Calendar(identifier: .gregorian)
-                    cal.timeZone = TimeZone.current
-                    let y  = cal.component(.year,   from: now)
-                    let mo = cal.component(.month,  from: now)
-                    let d  = cal.component(.day,    from: now)
-                    let h  = cal.component(.hour,   from: now)
-                    let mi = cal.component(.minute, from: now)
-                    let s  = cal.component(.second, from: now)
-                    let mpWday = (cal.component(.weekday, from: now) + 5) % 7
-                    let yday = cal.ordinality(of: .day, in: .year, for: now) ?? 1
-                    manager.sendCustomCommand(
-                        "import wasp;wasp.watch.rtc.set_localtime((\(y),\(mo),\(d),\(h),\(mi),\(s),\(mpWday),\(yday)))"
-                    )
+                    manager.setTime()
                 }
             }
 

@@ -373,6 +373,35 @@ final class DiaWatchManager: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Set time
+
+    func setTime() {
+        guard !isSending else { return }
+        let now = Date()
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone.current
+        let y  = cal.component(.year,   from: now)
+        let mo = cal.component(.month,  from: now)
+        let d  = cal.component(.day,    from: now)
+        let h  = cal.component(.hour,   from: now)
+        let mi = cal.component(.minute, from: now)
+        let s  = cal.component(.second, from: now)
+        let ff = TimeZone.current.secondsFromGMT(for: now)  // DST-aware
+
+        let message = "GB({\"app\":\"dw\",\"t\":\"s_t\",\"lt\":[\(y),\(mo),\(d),\(h),\(mi),\(s)],\"ff\":\(ff)})\r\n"
+        log.default("Setting DiaWatch time: lt=[%{public}d,%{public}d,%{public}d,%{public}d,%{public}d,%{public}d] ff=%{public}d",
+                    y, mo, d, h, mi, s, ff)
+        beginTransmission(message) { [weak self] in
+            guard let self else { return }
+            if self.receivedResponse {
+                self.lastPushError = self.bleResponse.contains("ERROR") ? "Watch rejected set time" : nil
+            } else {
+                self.lastPushError = "No response from watch"
+            }
+            self.log.default("DiaWatch set time complete")
+        }
+    }
+
     // MARK: - Custom command
 
     func sendCustomCommand(_ text: String) {
