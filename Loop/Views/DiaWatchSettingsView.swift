@@ -362,32 +362,29 @@ struct DiaWatchSettingsView: View {
         }
     }
 
-    @ViewBuilder
     private var pushStatusRow: some View {
-        switch manager.pushPhase {
-        case .connecting:
-            HStack(spacing: 5) {
+        HStack(spacing: 5) {
+            Text("Transmission status")
+            Spacer()
+            switch manager.pushPhase {
+            case .connecting:
                 ProgressView().scaleEffect(0.75)
-                Text("Connecting…").font(.caption).foregroundColor(.secondary)
-            }
-        case .sending:
-            HStack(spacing: 5) {
+                Text("Connecting…").foregroundColor(.secondary)
+            case .sending:
                 ProgressView().scaleEffect(0.75)
-                Text("Sending…").font(.caption).foregroundColor(.secondary)
-            }
-        case .purging:
-            HStack(spacing: 5) {
+                Text("Sending…").foregroundColor(.secondary)
+            case .purging:
                 ProgressView().scaleEffect(0.75)
-                Text("Purging — retrying in ~30 s…").font(.caption).foregroundColor(.secondary)
-            }
-        case .success:
-            EmptyView()
-        case .idle:
-            if let error = manager.lastPushError {
-                HStack(spacing: 4) {
+                Text("Purging…").foregroundColor(.secondary)
+            case .success:
+                Text("Success").foregroundColor(.green)
+            case .idle:
+                if let error = manager.lastPushError {
                     Image(systemName: "exclamationmark.circle.fill")
-                        .font(.caption).foregroundColor(.orange)
-                    Text(error).font(.caption).foregroundColor(.orange)
+                        .foregroundColor(.orange)
+                    Text(error).foregroundColor(.orange)
+                } else {
+                    Text("Idle").foregroundColor(.secondary)
                 }
             }
         }
