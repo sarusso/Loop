@@ -20,6 +20,7 @@ extension UserDefaults {
         case diaWatchPeripheralID = "com.loopkit.Loop.DiaWatch.peripheralID"
         case diaWatchDeviceName = "com.loopkit.Loop.DiaWatch.deviceName"
         case diaWatchPresets = "com.loopkit.Loop.DiaWatch.presets"
+        case diaWatchTransmissionsEnabled = "com.loopkit.Loop.DiaWatch.transmissionsEnabled"
     }
 
     var legacyPumpManagerRawValue: PumpManager.RawValue? {
@@ -105,6 +106,14 @@ extension UserDefaults {
     var diaWatchDeviceName: String? {
         get { string(forKey: Key.diaWatchDeviceName.rawValue) }
         set { set(newValue, forKey: Key.diaWatchDeviceName.rawValue) }
+    }
+
+    var diaWatchTransmissionsEnabled: Bool {
+        get {
+            // Default true if never set, matching the previous in-memory default.
+            object(forKey: Key.diaWatchTransmissionsEnabled.rawValue) as? Bool ?? true
+        }
+        set { set(newValue, forKey: Key.diaWatchTransmissionsEnabled.rawValue) }
     }
 
     var diaWatchPresets: [DiaWatchManager.Preset] {

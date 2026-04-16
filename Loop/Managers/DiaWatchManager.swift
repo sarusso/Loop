@@ -153,8 +153,11 @@ final class DiaWatchManager: NSObject, ObservableObject {
     @Published var pushPhase: PushPhase = .idle
     @Published var presets: [Preset] = UserDefaults.standard.diaWatchPresets
     @Published var bleResponse: String = ""
-    @Published var transmissionsEnabled: Bool = true {
-        didSet { if !transmissionsEnabled { transmissionQueue = [] } }
+    @Published var transmissionsEnabled: Bool = UserDefaults.standard.diaWatchTransmissionsEnabled {
+        didSet {
+            UserDefaults.standard.diaWatchTransmissionsEnabled = transmissionsEnabled
+            if !transmissionsEnabled { transmissionQueue = [] }
+        }
     }
 
     // MARK: - Private state
