@@ -166,6 +166,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         case sending
         case awaitingResponse
         case purging
+        case retrying(attempt: Int, of: Int)
     }
 
     @Published var pairedDeviceName: String?
@@ -205,6 +206,11 @@ final class DiaWatchManager: NSObject, ObservableObject {
     private var responseTimer: Timer?
     private static let responseInitialTimeout: TimeInterval = 20  // max wait for first byte
     private static let responseIdleTimeout: TimeInterval = 1.5    // disconnect after this much silence
+    private var memoryErrorRetries: Int = 0
+    private var isMemoryRetry: Bool = false
+    private var memoryRetryTimer: Timer?
+    private static let memoryRetryDelay: TimeInterval = 10
+    private static let memoryRetryMaxAttempts: Int = 3
     private var pendingCommandEcho: String?   // command text the REPL will echo back (no \r\n)
     private var echoDetected = false          // true once pendingCommandEcho seen in TX stream
     private var currentTransmissionMessage: String = ""
@@ -246,6 +252,20 @@ final class DiaWatchManager: NSObject, ObservableObject {
         push()
     }
 
+    // MARK: - Transmission result evaluation
+
+    private func evaluateResult(rejectMessage: String) {
+        if !receivedResponse {
+            lastPushError = "No response from watch"
+        } else if echoDetected && replPromptCount == 0 {
+            lastPushError = "Watch did not complete execution"
+        } else if bleResponse.range(of: "error", options: .caseInsensitive) != nil {
+            lastPushError = rejectMessage
+        } else {
+            lastPushError = nil
+        }
+    }
+
     // MARK: - Push (glucose reading)
 
     func push() {
@@ -270,12 +290,9 @@ final class DiaWatchManager: NSObject, ObservableObject {
             guard let self else { return }
             self.lastPushDate = Date()
             self.lastPushValue = self.lastSentMgdl
-            if self.receivedResponse {
-                self.lastPushError = self.bleResponse.contains("reading received")
-                    ? nil
-                    : "Unexpected watch response"
-            } else {
-                self.lastPushError = "No response from watch"
+            self.evaluateResult(rejectMessage: "Unexpected watch response")
+            if self.lastPushError == nil && !self.bleResponse.contains("reading received") {
+                self.lastPushError = "Unexpected watch response"
             }
             self.log.default("DiaWatch push complete")
         }
@@ -297,11 +314,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         log.default("Sending DiaWatch preset %{public}d ranges", index)
         beginTransmission(rangesMsg) { [weak self] in
             guard let self else { return }
-            if self.receivedResponse {
-                self.lastPushError = self.bleResponse.contains("ERROR") ? "Watch rejected ranges" : nil
-            } else {
-                self.lastPushError = "No response from watch"
-            }
+            self.evaluateResult(rejectMessage: "Watch rejected ranges")
             self.log.default("DiaWatch preset %{public}d ranges saved", index)
         }
     }
@@ -319,11 +332,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         log.default("Sending DiaWatch preset %{public}d general config", index)
         beginTransmission(configMsg) { [weak self] in
             guard let self else { return }
-            if self.receivedResponse {
-                self.lastPushError = self.bleResponse.contains("ERROR") ? "Watch rejected preset config" : nil
-            } else {
-                self.lastPushError = "No response from watch"
-            }
+            self.evaluateResult(rejectMessage: "Watch rejected preset config")
             self.log.default("DiaWatch preset %{public}d general config saved", index)
         }
     }
@@ -343,11 +352,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
         commands[commands.count - 1].1 = { [weak self] in
             guard let self else { return }
-            if self.receivedResponse {
-                self.lastPushError = self.bleResponse.contains("ERROR") ? "Watch rejected alert config" : nil
-            } else {
-                self.lastPushError = "No response from watch"
-            }
+            self.evaluateResult(rejectMessage: "Watch rejected alert config")
             self.log.default("DiaWatch preset %{public}d alerts saved", index)
         }
 
@@ -380,11 +385,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         log.default("Deleting DiaWatch preset %{public}d", lastIdx)
         beginTransmission("GB({\"app\":\"dw\",\"t\":\"d_p\",\"p\":\(lastIdx)})\r\n") { [weak self] in
             guard let self else { return }
-            if self.receivedResponse {
-                self.lastPushError = self.bleResponse.contains("ERROR") ? "Watch rejected preset delete" : nil
-            } else {
-                self.lastPushError = "No response from watch"
-            }
+            self.evaluateResult(rejectMessage: "Watch rejected preset delete")
             self.log.default("DiaWatch preset %{public}d deleted", lastIdx)
         }
     }
@@ -395,11 +396,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         log.default("Activating DiaWatch preset %{public}d", index)
         beginTransmission(message) { [weak self] in
             guard let self else { return }
-            if self.receivedResponse {
-                self.lastPushError = self.bleResponse.contains("ERROR") ? "Watch rejected preset activation" : nil
-            } else {
-                self.lastPushError = "No response from watch"
-            }
+            self.evaluateResult(rejectMessage: "Watch rejected preset activation")
         }
     }
 
@@ -423,11 +420,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
                     y, mo, d, h, mi, s, ff)
         beginTransmission(message) { [weak self] in
             guard let self else { return }
-            if self.receivedResponse {
-                self.lastPushError = self.bleResponse.contains("ERROR") ? "Watch rejected set time" : nil
-            } else {
-                self.lastPushError = "No response from watch"
-            }
+            self.evaluateResult(rejectMessage: "Watch rejected set time")
             self.log.default("DiaWatch set time complete")
         }
     }
@@ -481,6 +474,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
         currentTransmissionMessage = message
         pendingCommandEcho = message.trimmingCharacters(in: .whitespacesAndNewlines)
         echoDetected = false
+        if !isMemoryRetry { memoryErrorRetries = 0 }
+        isMemoryRetry = false
         // withPreamble = true only on purge retry — prepends \x03\x03 to clear a stuck REPL.
         // On first attempt we skip the preamble: it can freeze the watch during boot.
         let data = withPreamble ? Data([0x03, 0x03]) + msgData : msgData
@@ -574,6 +569,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
     private func abortSend(error: String) {
         cancelSendTimeout()
         cancelResponseTimer()
+        memoryRetryTimer?.invalidate()
+        memoryRetryTimer = nil
         isSending = false
         pendingChunks = []
         peripheral = nil
@@ -770,6 +767,27 @@ extension DiaWatchManager: CBCentralManagerDelegate {
             } else {
                 isRetryAttempt = false
                 if !echoDetected { lastPushError = "No echo from watch" }
+
+                if bleResponse.range(of: "MemoryError", options: .caseInsensitive) != nil
+                    && memoryErrorRetries < Self.memoryRetryMaxAttempts {
+                    memoryErrorRetries += 1
+                    let retryMsg = currentTransmissionMessage
+                    let retryCompletion = onTransmissionComplete
+                    onTransmissionComplete = nil
+                    log.default("DiaWatch MemoryError — retry %{public}d/%{public}d in %{public}.0f s",
+                                memoryErrorRetries, Self.memoryRetryMaxAttempts, Self.memoryRetryDelay)
+                    isSending = true
+                    pushPhase = .retrying(attempt: memoryErrorRetries, of: Self.memoryRetryMaxAttempts)
+                    memoryRetryTimer = Timer.scheduledTimer(withTimeInterval: Self.memoryRetryDelay, repeats: false) { [weak self] _ in
+                        guard let self else { return }
+                        self.memoryRetryTimer = nil
+                        self.isSending = false
+                        self.isMemoryRetry = true
+                        self.beginTransmission(retryMsg, onComplete: retryCompletion)
+                    }
+                    return
+                }
+
                 onTransmissionComplete?()
                 onTransmissionComplete = nil
                 hasTransmitted = true

@@ -378,6 +378,9 @@ struct DiaWatchSettingsView: View {
             case .awaitingResponse:
                 ProgressView().scaleEffect(0.75)
                 Text("Awaiting response…").foregroundColor(.secondary)
+            case .retrying(let attempt, let total):
+                ProgressView().scaleEffect(0.75)
+                Text("MemoryError, retrying (\(attempt)/\(total))…").foregroundColor(.orange)
             case .idle:
                 if let error = manager.lastPushError {
                     Image(systemName: "exclamationmark.circle.fill")
