@@ -156,7 +156,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         case idle
         case connecting
         case sending
-        case success
+        case awaitingResponse
         case purging
     }
 
@@ -167,6 +167,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
     @Published var isScanning: Bool = false
     @Published var discoveredDevices: [DiscoveredDevice] = []
     @Published var pushPhase: PushPhase = .idle
+    @Published var lastResponseDate: Date?
+    @Published var hasTransmitted: Bool = false
     @Published var presets: [Preset] = UserDefaults.standard.diaWatchPresets
     @Published var bleResponse: String = ""
     @Published var transmissionsEnabled: Bool = UserDefaults.standard.diaWatchTransmissionsEnabled {
@@ -500,6 +502,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
             guard let self else { return }
             self.lastPushError = "No device paired"
             self.isSending = false
+            self.hasTransmitted = true
             self.pushPhase = .idle
         }
     }
@@ -574,6 +577,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         isRetryAttempt = false
         cancelPurgeTimer()
         lastPushError = error
+        hasTransmitted = true
         pushPhase = .idle
     }
 
@@ -645,7 +649,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         guard !pendingChunks.isEmpty else {
             // All chunks sent — cancel send timeout, arm response timer
             cancelSendTimeout()
-            pushPhase = .success
+            pushPhase = .awaitingResponse
             armResponseTimer(delay: Self.responseInitialTimeout)
             return
         }
@@ -741,6 +745,7 @@ extension DiaWatchManager: CBCentralManagerDelegate {
             log.error("DiaWatch disconnected mid-send: %{public}@", msg)
             onTransmissionComplete = nil
             lastPushError = msg
+            hasTransmitted = true
             pushPhase = .idle
         } else if !transmissionQueue.isEmpty {
             let next = transmissionQueue.removeFirst()
@@ -759,6 +764,7 @@ extension DiaWatchManager: CBCentralManagerDelegate {
                 if !echoDetected { lastPushError = "No echo from watch" }
                 onTransmissionComplete?()
                 onTransmissionComplete = nil
+                hasTransmitted = true
                 pushPhase = .idle
             }
         }
@@ -836,6 +842,7 @@ extension DiaWatchManager: CBPeripheralDelegate {
         }
         receivedResponse = true
         bleResponse += text
+        lastResponseDate = Date()
         log.default("DiaWatch TX: %{public}@", text)
 
         var justDetectedEcho = false

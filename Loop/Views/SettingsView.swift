@@ -406,12 +406,8 @@ extension SettingsView {
                     .fill(lastPushStatusColor)
                     .frame(width: 10, height: 10)
             }
-        case .connecting, .sending, .purging:
+        case .connecting, .sending, .purging, .awaitingResponse:
             ProgressView().scaleEffect(0.7)
-        case .success:
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(.green)
-                .font(.caption)
         }
     }
 

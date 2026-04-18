@@ -61,6 +61,12 @@ struct DiaWatchSettingsView: View {
         return f
     }()
 
+    private static let responseDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm dd/M/yyyy"
+        return f
+    }()
+
     private static func formatPattern(_ pat: String) -> String {
         pat.split(separator: "_").map { $0.capitalized }.joined(separator: " ")
     }
@@ -355,7 +361,7 @@ struct DiaWatchSettingsView: View {
 
     private var pushStatusRow: some View {
         HStack(spacing: 5) {
-            Text("Transmission status")
+            Text("Status")
             Spacer()
             switch manager.pushPhase {
             case .connecting:
@@ -367,13 +373,16 @@ struct DiaWatchSettingsView: View {
             case .purging:
                 ProgressView().scaleEffect(0.75)
                 Text("Purging…").foregroundColor(.secondary)
-            case .success:
-                Text("Success").foregroundColor(.green)
+            case .awaitingResponse:
+                ProgressView().scaleEffect(0.75)
+                Text("Awaiting response…").foregroundColor(.secondary)
             case .idle:
                 if let error = manager.lastPushError {
                     Image(systemName: "exclamationmark.circle.fill")
                         .foregroundColor(.orange)
-                    Text(error).foregroundColor(.orange)
+                    Text("\(error), idle").foregroundColor(.orange)
+                } else if manager.hasTransmitted {
+                    Text("OK, idle").foregroundColor(.green)
                 } else {
                     Text("Idle").foregroundColor(.secondary)
                 }
@@ -843,7 +852,7 @@ struct DiaWatchSettingsView: View {
             .padding(.vertical, 2)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Last transmission response")
+                Text(manager.lastResponseDate.map { "Last transmission response (@ \(Self.responseDateFormatter.string(from: $0)))" } ?? "Last transmission response")
                     .font(.caption)
                     .foregroundColor(.secondary)
                 ScrollViewReader { proxy in
