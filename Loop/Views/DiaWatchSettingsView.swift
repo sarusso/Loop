@@ -449,6 +449,22 @@ struct DiaWatchSettingsView: View {
 
                 Button {
                     if anyDirty {
+                        showUnsavedChangesAlert = true
+                    } else {
+                        manager.duplicatePreset(at: selectedPresetIndex)
+                        selectedPresetIndex = manager.presets.count - 1
+                        configTab = .general
+                        generalDirty = true
+                    }
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .buttonStyle(.borderless)
+                .disabled(manager.presets.count >= DiaWatchManager.maxPresets)
+                .padding(.trailing, 12)
+
+                Button {
+                    if anyDirty {
                         pendingAddPreset = true
                         showUnsavedChangesAlert = true
                     } else {
@@ -460,6 +476,8 @@ struct DiaWatchSettingsView: View {
                 } label: {
                     Image(systemName: "plus.circle")
                 }
+                .buttonStyle(.borderless)
+                .disabled(manager.presets.count >= DiaWatchManager.maxPresets)
             }
 
             actionRow(

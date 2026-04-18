@@ -361,13 +361,23 @@ final class DiaWatchManager: NSObject, ObservableObject {
         beginTransmission(commands[0].0, onComplete: commands[0].1)
     }
 
+    static let maxPresets = 4
+
     func addPreset() {
+        guard presets.count < Self.maxPresets else { return }
         let newPreset = Preset(
             name: "Preset \(presets.count)",
             wakeOnReading: false,
             hapticAlerts: HapticAlert.defaults
         )
         presets.append(newPreset)
+    }
+
+    func duplicatePreset(at index: Int) {
+        guard index < presets.count, presets.count < Self.maxPresets else { return }
+        var copy = presets[index]
+        copy.name = "\(copy.name) copy"
+        presets.append(copy)
     }
 
     func deleteLastPreset() {
