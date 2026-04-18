@@ -50,7 +50,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         }
     }
 
-    enum TapAction: Int, Codable, CaseIterable {
+    enum ButtonAndTapAction: Int, Codable, CaseIterable {
         case nothing = 0
         case wake = 1
         case haptics = 2
@@ -58,7 +58,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         var label: String {
             switch self {
             case .nothing: return "Nothing"
-            case .wake:    return "Wake"
+            case .wake:    return "Wake/Sleep"
             case .haptics: return "Haptics"
             }
         }
@@ -73,9 +73,11 @@ final class DiaWatchManager: NSObject, ObservableObject {
         var forecaster: Forecaster
         var od: Int      // outdated data threshold in minutes
         var nd: Int      // no data threshold in minutes
-        var st: TapAction    // single tap action
-        var dt: TapAction    // double tap action
-        var lt: TapAction    // long tap action
+        var st: ButtonAndTapAction    // single tap action
+        var dt: ButtonAndTapAction    // double tap action
+        var lt: ButtonAndTapAction    // long tap action
+        var sp: ButtonAndTapAction    // short press action
+        var lp: ButtonAndTapAction    // long press action
         var rangeCutoffs: [Int]      // 4 ascending glucose cutoffs in mg/dL
         var rangeHaptics: [String]   // 5 haptic patterns, one per range
         var rangePlayHaptic: [Bool]  // 5 per-range flags: play haptic on new reading in that range
@@ -99,13 +101,15 @@ final class DiaWatchManager: NSObject, ObservableObject {
             st: .nothing,
             dt: .wake,
             lt: .haptics,
+            sp: .wake,
+            lp: .nothing,
             rangeCutoffs: defaultRangeCutoffs,
             rangeHaptics: defaultRangeHaptics,
             rangePlayHaptic: defaultRangePlayHaptic,
             hapticAlerts: HapticAlert.defaults
         )
 
-        init(name: String, wakeOnReading: Bool, displayBrightness: Int = 2, displayAlwaysOn: Bool = false, displaySleepSec: Int = 10, forecaster: Forecaster = .projection, od: Int = 10, nd: Int = 30, st: TapAction = .nothing, dt: TapAction = .wake, lt: TapAction = .haptics, rangeCutoffs: [Int] = Preset.defaultRangeCutoffs, rangeHaptics: [String] = Preset.defaultRangeHaptics, rangePlayHaptic: [Bool] = Preset.defaultRangePlayHaptic, hapticAlerts: [HapticAlert]) {
+        init(name: String, wakeOnReading: Bool, displayBrightness: Int = 2, displayAlwaysOn: Bool = false, displaySleepSec: Int = 10, forecaster: Forecaster = .none, od: Int = 10, nd: Int = 30, st: ButtonAndTapAction = .nothing, dt: ButtonAndTapAction = .wake, lt: ButtonAndTapAction = .haptics, sp: ButtonAndTapAction = .wake, lp: ButtonAndTapAction = .nothing, rangeCutoffs: [Int] = Preset.defaultRangeCutoffs, rangeHaptics: [String] = Preset.defaultRangeHaptics, rangePlayHaptic: [Bool] = Preset.defaultRangePlayHaptic, hapticAlerts: [HapticAlert]) {
             self.name = name
             self.wakeOnReading = wakeOnReading
             self.displayBrightness = displayBrightness
@@ -117,6 +121,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
             self.st = st
             self.dt = dt
             self.lt = lt
+            self.sp = sp
+            self.lp = lp
             self.rangeCutoffs = rangeCutoffs
             self.rangeHaptics = rangeHaptics
             self.rangePlayHaptic = rangePlayHaptic
@@ -133,9 +139,11 @@ final class DiaWatchManager: NSObject, ObservableObject {
             forecaster = try c.decodeIfPresent(Forecaster.self, forKey: .forecaster) ?? .none
             od = try c.decodeIfPresent(Int.self, forKey: .od) ?? 10
             nd = try c.decodeIfPresent(Int.self, forKey: .nd) ?? 30
-            st = try c.decodeIfPresent(TapAction.self, forKey: .st) ?? .nothing
-            dt = try c.decodeIfPresent(TapAction.self, forKey: .dt) ?? .wake
-            lt = try c.decodeIfPresent(TapAction.self, forKey: .lt) ?? .haptics
+            st = try c.decodeIfPresent(ButtonAndTapAction.self, forKey: .st) ?? .nothing
+            dt = try c.decodeIfPresent(ButtonAndTapAction.self, forKey: .dt) ?? .wake
+            lt = try c.decodeIfPresent(ButtonAndTapAction.self, forKey: .lt) ?? .haptics
+            sp = try c.decodeIfPresent(ButtonAndTapAction.self, forKey: .sp) ?? .wake
+            lp = try c.decodeIfPresent(ButtonAndTapAction.self, forKey: .lp) ?? .nothing
             rangeCutoffs = try c.decodeIfPresent([Int].self, forKey: .rangeCutoffs) ?? Preset.defaultRangeCutoffs
             rangeHaptics = try c.decodeIfPresent([String].self, forKey: .rangeHaptics) ?? Preset.defaultRangeHaptics
             rangePlayHaptic = try c.decodeIfPresent([Bool].self, forKey: .rangePlayHaptic) ?? Preset.defaultRangePlayHaptic
@@ -306,7 +314,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let preset = presets[index]
         let dsValue = preset.displayAlwaysOn ? "null" : "\(preset.displaySleepSec)"
         let fcValue = preset.forecaster == .none ? "null" : "\"\(preset.forecaster.rawValue)\""
-        let configMsg = "GB({\"app\":\"dw\",\"t\":\"s_c\",\"p\":\(index),\"n\":\"\(preset.name)\",\"rw\":\(preset.wakeOnReading ? 1 : 0),\"db\":\(preset.displayBrightness),\"ds\":\(dsValue),\"fc\":\(fcValue),\"od\":\(preset.od),\"nd\":\(preset.nd),\"st\":\(preset.st.rawValue),\"dt\":\(preset.dt.rawValue),\"lt\":\(preset.lt.rawValue)})\r\n"
+        let configMsg = "GB({\"app\":\"dw\",\"t\":\"s_c\",\"p\":\(index),\"n\":\"\(preset.name)\",\"rw\":\(preset.wakeOnReading ? 1 : 0),\"db\":\(preset.displayBrightness),\"ds\":\(dsValue),\"fc\":\(fcValue),\"od\":\(preset.od),\"nd\":\(preset.nd),\"st\":\(preset.st.rawValue),\"dt\":\(preset.dt.rawValue),\"lt\":\(preset.lt.rawValue),\"sp\":\(preset.sp.rawValue),\"lp\":\(preset.lp.rawValue)})\r\n"
 
         log.default("Sending DiaWatch preset %{public}d general config", index)
         beginTransmission(configMsg) { [weak self] in
