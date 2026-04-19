@@ -406,7 +406,7 @@ extension SettingsView {
                     .fill(lastPushStatusColor)
                     .frame(width: 10, height: 10)
             }
-        case .connecting, .sending, .purging, .awaitingResponse, .retrying:
+        case .connecting, .sending, .purging, .awaitingResponse, .retrying, .streaming:
             ProgressView().scaleEffect(0.7)
         }
     }

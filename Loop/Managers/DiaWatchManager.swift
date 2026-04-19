@@ -167,6 +167,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         case awaitingResponse
         case purging
         case retrying(attempt: Int, of: Int)
+        case streaming
     }
 
     @Published var pairedDeviceName: String?
@@ -178,6 +179,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
     @Published var pushPhase: PushPhase = .idle
     @Published var lastResponseDate: Date?
     @Published var hasTransmitted: Bool = false
+    @Published var isStreaming: Bool = false
     @Published var presets: [Preset] = UserDefaults.standard.diaWatchPresets
     @Published var bleResponse: String = ""
     @Published var purgeEnabled: Bool = false
@@ -450,6 +452,24 @@ final class DiaWatchManager: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Log stream
+
+    func startLogStream() {
+        guard !isSending, !isStreaming else { return }
+        isStreaming = true
+        bleResponse = ""
+        pushPhase = .connecting
+        connectOrScan()
+    }
+
+    func stopLogStream() {
+        guard isStreaming else { return }
+        if let p = peripheral {
+            central.cancelPeripheralConnection(p)
+        }
+        // isStreaming is cleared in didDisconnectPeripheral
+    }
+
     // MARK: - Haptic test
 
     func testHaptic(name: String) {
@@ -583,6 +603,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         cancelResponseTimer()
         cancelPromptTimer()
         waitingForPrompt = false
+        isStreaming = false
         memoryRetryTimer?.invalidate()
         memoryRetryTimer = nil
         isSending = false
@@ -790,8 +811,17 @@ extension DiaWatchManager: CBCentralManagerDelegate {
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         cancelSendTimeout()
         cancelResponseTimer()
+        cancelPromptTimer()
         rxCharacteristic = nil
         self.peripheral = nil
+
+        if isStreaming {
+            isStreaming = false
+            log.default("DiaWatch log stream ended")
+            pushPhase = .idle
+            return
+        }
+
         let wasStillSending = isSending && !pendingChunks.isEmpty
         isSending = false
         pendingChunks = []
@@ -893,8 +923,15 @@ extension DiaWatchManager: CBPeripheralDelegate {
         if let error = error {
             log.error("DiaWatch TX notify error: %{public}@", error.localizedDescription)
         }
-        // TX subscription done (or failed) — probe for REPL readiness before writing
-        probeForPrompt()
+        if isStreaming {
+            // Streaming: just listen, no probe, no payload
+            log.default("DiaWatch log stream active")
+            cancelSendTimeout()
+            pushPhase = .streaming
+        } else {
+            // Normal: probe for REPL readiness before writing
+            probeForPrompt()
+        }
     }
 
     func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
@@ -924,6 +961,13 @@ extension DiaWatchManager: CBPeripheralDelegate {
                 log.default("DiaWatch REPL prompt detected — starting write")
                 writeNextChunk()
             }
+            return
+        }
+
+        // While streaming, just accumulate — no echo/prompt logic, no timers.
+        if isStreaming {
+            bleResponse += text
+            lastResponseDate = Date()
             return
         }
 

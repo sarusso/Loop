@@ -384,6 +384,9 @@ struct DiaWatchSettingsView: View {
             case .awaitingResponse:
                 ProgressView().scaleEffect(0.75)
                 Text("Awaiting response…").foregroundColor(.secondary)
+            case .streaming:
+                ProgressView().scaleEffect(0.75)
+                Text("Streaming…").foregroundColor(.secondary)
             case .retrying(let attempt, let total):
                 ProgressView().scaleEffect(0.75)
                 Text("MemoryError, retrying (\(attempt)/\(total))…").foregroundColor(.orange)
@@ -905,6 +908,28 @@ struct DiaWatchSettingsView: View {
                 }
             }
             .padding(.vertical, 2)
+
+            if manager.isStreaming {
+                Button {
+                    manager.stopLogStream()
+                } label: {
+                    HStack {
+                        Image(systemName: "stop.circle.fill").foregroundColor(.red)
+                        Text("Stop log stream").foregroundColor(.red)
+                    }
+                }
+            } else {
+                Button {
+                    debugExpanded = true
+                    manager.startLogStream()
+                } label: {
+                    HStack {
+                        Image(systemName: "play.circle")
+                        Text("Start log stream")
+                    }
+                }
+                .disabled(manager.pushPhase != .idle)
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(manager.lastResponseDate.map { "Last transmission response (@ \(Self.responseDateFormatter.string(from: $0)))" } ?? "Last transmission response")
