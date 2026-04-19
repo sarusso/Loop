@@ -22,7 +22,7 @@ struct DiaWatchSettingsView: View {
     @State private var alertsDirty = false
     @State private var rangesDirty = false
 
-    private enum ActiveButton { case none, test, saveGeneral, saveAlerts, saveRanges, activatePreset, deletePreset, testHaptic, customCommand, setTime, battery, freeMem, uptime }
+    private enum ActiveButton { case none, test, saveGeneral, saveAlerts, saveRanges, activatePreset, deletePreset, testHaptic, customCommand, setTime, battery, freeMem, uptime, ctrlC }
     @State private var activeButton: ActiveButton = .none
 
     @FocusState private var presetNameFocused: Bool
@@ -53,6 +53,7 @@ struct DiaWatchSettingsView: View {
     @State private var batteryStatus: ButtonStatus? = nil
     @State private var freeMemStatus: ButtonStatus? = nil
     @State private var uptimeStatus: ButtonStatus? = nil
+    @State private var ctrlCStatus: ButtonStatus? = nil
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -224,6 +225,7 @@ struct DiaWatchSettingsView: View {
             case .battery:       text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
             case .freeMem:       text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
             case .uptime:        text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
+            case .ctrlC:         text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
             case .none:          return
             }
 
@@ -268,6 +270,9 @@ struct DiaWatchSettingsView: View {
             case .uptime:
                 uptimeStatus = status
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { uptimeStatus = nil }
+            case .ctrlC:
+                ctrlCStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { ctrlCStatus = nil }
             case .none: break
             }
         }
@@ -339,6 +344,8 @@ struct DiaWatchSettingsView: View {
                 }
             }
 
+            Toggle("Push readings", isOn: $manager.transmissionsEnabled)
+
             if let date = manager.lastPushDate {
                 HStack {
                     Text("Last push")
@@ -352,10 +359,8 @@ struct DiaWatchSettingsView: View {
                     }
                 }
             } else if manager.pairedDeviceName != nil {
-                Text("No readings sent yet").foregroundColor(.secondary)
+                Text("No readings pushed yet").foregroundColor(.secondary)
             }
-
-            Toggle("Enable transmissions", isOn: $manager.transmissionsEnabled)
 
             pushStatusRow
         }
@@ -858,6 +863,18 @@ struct DiaWatchSettingsView: View {
                 activeButton = .uptime
                 manager.sendCustomCommand("import wasp;wasp.uptime()/3600")
             }
+
+            actionRow(
+                label: "Send Ctrl-C",
+                id: .ctrlC,
+                dirty: false,
+                status: ctrlCStatus
+            ) {
+                activeButton = .ctrlC
+                manager.sendCustomCommand("\u{03}")
+            }
+
+            Toggle("Enable purge (Ctrl-C retry)", isOn: $manager.purgeEnabled)
 
             VStack(alignment: .leading, spacing: 6) {
                 TextField("Custom command", text: $customCommandText)

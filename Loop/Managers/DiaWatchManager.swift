@@ -180,6 +180,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
     @Published var hasTransmitted: Bool = false
     @Published var presets: [Preset] = UserDefaults.standard.diaWatchPresets
     @Published var bleResponse: String = ""
+    @Published var purgeEnabled: Bool = false
     @Published var transmissionsEnabled: Bool = UserDefaults.standard.diaWatchTransmissionsEnabled {
         didSet {
             UserDefaults.standard.diaWatchTransmissionsEnabled = transmissionsEnabled
@@ -206,6 +207,10 @@ final class DiaWatchManager: NSObject, ObservableObject {
     private var responseTimer: Timer?
     private static let responseInitialTimeout: TimeInterval = 20  // max wait for first byte
     private static let responseIdleTimeout: TimeInterval = 1.5    // disconnect after this much silence
+    private var waitingForPrompt: Bool = false
+    private var usePreamble: Bool = false
+    private var promptTimer: Timer?
+    private static let promptTimeout: TimeInterval = 5
     private var memoryErrorRetries: Int = 0
     private var isMemoryRetry: Bool = false
     private var memoryRetryTimer: Timer?
@@ -303,8 +308,6 @@ final class DiaWatchManager: NSObject, ObservableObject {
     func saveRanges(at index: Int) {
         guard !isSending, index < presets.count else { return }
 
-        UserDefaults.standard.diaWatchPresets = presets
-
         let preset = presets[index]
         let rcJSON = "[" + preset.rangeCutoffs.map(String.init).joined(separator: ",") + "]"
         let rhJSON = "[" + preset.rangeHaptics.map { "\"\($0)\"" }.joined(separator: ",") + "]"
@@ -315,14 +318,13 @@ final class DiaWatchManager: NSObject, ObservableObject {
         beginTransmission(rangesMsg) { [weak self] in
             guard let self else { return }
             self.evaluateResult(rejectMessage: "Watch rejected ranges")
+            if self.lastPushError == nil { UserDefaults.standard.diaWatchPresets = self.presets }
             self.log.default("DiaWatch preset %{public}d ranges saved", index)
         }
     }
 
     func saveGeneralConfig(at index: Int) {
         guard !isSending, index < presets.count else { return }
-
-        UserDefaults.standard.diaWatchPresets = presets
 
         let preset = presets[index]
         let dsValue = preset.displayAlwaysOn ? "null" : "\(preset.displaySleepSec)"
@@ -333,14 +335,13 @@ final class DiaWatchManager: NSObject, ObservableObject {
         beginTransmission(configMsg) { [weak self] in
             guard let self else { return }
             self.evaluateResult(rejectMessage: "Watch rejected preset config")
+            if self.lastPushError == nil { UserDefaults.standard.diaWatchPresets = self.presets }
             self.log.default("DiaWatch preset %{public}d general config saved", index)
         }
     }
 
     func saveAlerts(at index: Int) {
         guard !isSending, index < presets.count else { return }
-
-        UserDefaults.standard.diaWatchPresets = presets
 
         let preset = presets[index]
         var commands: [(String, (() -> Void)?)] = preset.hapticAlerts.enumerated().map { alertIdx, alert in
@@ -353,6 +354,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         commands[commands.count - 1].1 = { [weak self] in
             guard let self else { return }
             self.evaluateResult(rejectMessage: "Watch rejected alert config")
+            if self.lastPushError == nil { UserDefaults.standard.diaWatchPresets = self.presets }
             self.log.default("DiaWatch preset %{public}d alerts saved", index)
         }
 
@@ -486,11 +488,11 @@ final class DiaWatchManager: NSObject, ObservableObject {
         echoDetected = false
         if !isMemoryRetry { memoryErrorRetries = 0 }
         isMemoryRetry = false
-        // withPreamble = true only on purge retry — prepends \x03\x03 to clear a stuck REPL.
-        // On first attempt we skip the preamble: it can freeze the watch during boot.
-        let data = withPreamble ? Data([0x03, 0x03]) + msgData : msgData
-        pendingChunks = stride(from: 0, to: data.count, by: 20).map {
-            Data(data[$0 ..< min($0 + 20, data.count)])
+        usePreamble = withPreamble
+        // Preamble (\x03\x03) is now sent in probeForPrompt() before the \r probe,
+        // not prepended to the message chunks.
+        pendingChunks = stride(from: 0, to: msgData.count, by: 20).map {
+            Data(msgData[$0 ..< min($0 + 20, msgData.count)])
         }
         for (i, chunk) in pendingChunks.enumerated() {
             let asString = String(data: chunk, encoding: .utf8) ?? chunk.map { String(format: "%02x", $0) }.joined()
@@ -579,6 +581,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
     private func abortSend(error: String) {
         cancelSendTimeout()
         cancelResponseTimer()
+        cancelPromptTimer()
+        waitingForPrompt = false
         memoryRetryTimer?.invalidate()
         memoryRetryTimer = nil
         isSending = false
@@ -654,6 +658,43 @@ final class DiaWatchManager: NSObject, ObservableObject {
         lastPushError = nil
         bleResponse = ""
         log.default("Forgot DiaWatch device")
+    }
+
+    // MARK: - REPL prompt probe
+
+    private func probeForPrompt() {
+        guard let p = peripheral, let rx = rxCharacteristic else { return }
+
+        waitingForPrompt = true
+
+        // If retrying with preamble, send \x03\x03 first to clear a stuck REPL,
+        // then \r to solicit the >>> prompt. On first attempt, send only \r —
+        // if the watch is booting, no prompt arrives and we time out safely
+        // instead of interrupting the boot sequence.
+        if usePreamble {
+            log.default("DiaWatch probing for REPL prompt (sending \\x03\\x03 + \\r)")
+            let preambleAndProbe = Data([0x03, 0x03, 0x0D])
+            p.writeValue(preambleAndProbe, for: rx, type: .withResponse)
+        } else {
+            log.default("DiaWatch probing for REPL prompt (sending \\r)")
+            let probe = Data([0x0D])
+            p.writeValue(probe, for: rx, type: .withResponse)
+        }
+
+        promptTimer = Timer.scheduledTimer(withTimeInterval: Self.promptTimeout, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            self.promptTimer = nil
+            if self.waitingForPrompt {
+                self.waitingForPrompt = false
+                self.log.default("DiaWatch REPL prompt not received within %{public}.0f s", Self.promptTimeout)
+                self.abortSend(error: "REPL not ready")
+            }
+        }
+    }
+
+    private func cancelPromptTimer() {
+        promptTimer?.invalidate()
+        promptTimer = nil
     }
 
     // MARK: - Chunked write
@@ -767,8 +808,8 @@ extension DiaWatchManager: CBCentralManagerDelegate {
             log.default("Sending DiaWatch queued command")
             beginTransmission(next.message, onComplete: next.onComplete)
         } else {
-            if !echoDetected && !isRetryAttempt {
-                // First attempt got no echo — could be a boot. Purge and retry with \x03\x03.
+            if !echoDetected && !isRetryAttempt && purgeEnabled {
+                // First attempt got no echo and purge is enabled — retry with \x03\x03.
                 let retryMsg = currentTransmissionMessage
                 let retryCompletion = onTransmissionComplete
                 onTransmissionComplete = nil
@@ -840,11 +881,11 @@ extension DiaWatchManager: CBPeripheralDelegate {
         // handler once the central has enabled notifications on TX.
         if let tx = service.characteristics?.first(where: { $0.uuid == Self.nusTXCharUUID }) {
             peripheral.setNotifyValue(true, for: tx)
-            // writeNextChunk() will be called from didUpdateNotificationStateFor
+            // probeForPrompt() will be called from didUpdateNotificationStateFor
         } else {
             // TX not found — try writing anyway
             log.default("DiaWatch NUS TX characteristic not found, writing without subscription")
-            writeNextChunk()
+            probeForPrompt()
         }
     }
 
@@ -852,8 +893,8 @@ extension DiaWatchManager: CBPeripheralDelegate {
         if let error = error {
             log.error("DiaWatch TX notify error: %{public}@", error.localizedDescription)
         }
-        // TX subscription done (or failed) — start writing to RX regardless
-        writeNextChunk()
+        // TX subscription done (or failed) — probe for REPL readiness before writing
+        probeForPrompt()
     }
 
     func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
@@ -872,6 +913,20 @@ extension DiaWatchManager: CBPeripheralDelegate {
         guard error == nil,
               let data = characteristic.value,
               let text = String(data: data, encoding: .utf8) else { return }
+
+        // While probing for REPL readiness, look for >>> before writing any payload.
+        if waitingForPrompt {
+            bleResponse += text
+            if bleResponse.contains(">>>") {
+                waitingForPrompt = false
+                cancelPromptTimer()
+                bleResponse = ""
+                log.default("DiaWatch REPL prompt detected — starting write")
+                writeNextChunk()
+            }
+            return
+        }
+
         if !responseSessionStarted {
             bleResponse = ""
             responseSessionStarted = true
