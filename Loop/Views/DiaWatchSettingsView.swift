@@ -26,6 +26,7 @@ struct DiaWatchSettingsView: View {
     @State private var activeButton: ActiveButton = .none
 
     @FocusState private var presetNameFocused: Bool
+    @State private var debugExpanded = false
 
     struct ButtonStatus {
         var text: String
@@ -358,7 +359,7 @@ struct DiaWatchSettingsView: View {
                             .foregroundColor(.secondary)
                     }
                 }
-            } else if manager.pairedDeviceName != nil {
+            } else {
                 Text("No readings pushed yet").foregroundColor(.secondary)
             }
 
@@ -795,8 +796,7 @@ struct DiaWatchSettingsView: View {
 
     private var testHapticsSection: some View {
         Section(
-            header: Text("Test Haptics"),
-            footer: Text("Sends a MicroPython command to the watch to play the selected pattern immediately.")
+            header: Text("Test Haptics")
         ) {
             Picker("Pattern", selection: $selectedHapticPattern) {
                 ForEach(DiaWatchManager.HapticAlert.allPatterns, id: \.self) { pat in
@@ -820,8 +820,21 @@ struct DiaWatchSettingsView: View {
     // MARK: - Debug
 
     private var debugSection: some View {
-        Section(header: Text("Debug")) {
-            Stepper(value: $testMgdl, in: 40...400, step: 5) {
+        Section {
+            Button {
+                withAnimation { debugExpanded.toggle() }
+            } label: {
+                HStack {
+                    Text("Debug").foregroundColor(.primary)
+                    Spacer()
+                    Image(systemName: debugExpanded ? "chevron.up" : "chevron.down")
+                        .foregroundColor(.secondary)
+                        .font(.caption)
+                }
+            }
+
+            if debugExpanded {
+                Stepper(value: $testMgdl, in: 40...400, step: 5) {
                 Text("Test value: \(testMgdl) mg/dL")
             }
             actionRow(
@@ -916,8 +929,10 @@ struct DiaWatchSettingsView: View {
                 }
             }
             .padding(.vertical, 4)
+            }
         }
     }
+
 
     // MARK: - Shared action row
 
