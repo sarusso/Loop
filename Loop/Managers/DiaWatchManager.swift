@@ -40,12 +40,12 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
     enum Forecaster: String, Codable, CaseIterable {
         case none
-        case projection = "Projection"
+        case trend = "Trend"
 
         var label: String {
             switch self {
             case .none:       return "None"
-            case .projection: return "Projection"
+            case .trend: return "Trend"
             }
         }
     }
@@ -136,14 +136,14 @@ final class DiaWatchManager: NSObject, ObservableObject {
             displayBrightness = try c.decodeIfPresent(Int.self, forKey: .displayBrightness) ?? 2
             displayAlwaysOn = try c.decodeIfPresent(Bool.self, forKey: .displayAlwaysOn) ?? false
             displaySleepSec = try c.decodeIfPresent(Int.self, forKey: .displaySleepSec) ?? 10
-            forecaster = try c.decodeIfPresent(Forecaster.self, forKey: .forecaster) ?? .none
+            forecaster = (try? c.decodeIfPresent(Forecaster.self, forKey: .forecaster)) ?? .none
             od = try c.decodeIfPresent(Int.self, forKey: .od) ?? 10
             nd = try c.decodeIfPresent(Int.self, forKey: .nd) ?? 30
-            st = try c.decodeIfPresent(ButtonAndTapAction.self, forKey: .st) ?? .nothing
-            dt = try c.decodeIfPresent(ButtonAndTapAction.self, forKey: .dt) ?? .wake
-            lt = try c.decodeIfPresent(ButtonAndTapAction.self, forKey: .lt) ?? .haptics
-            sp = try c.decodeIfPresent(ButtonAndTapAction.self, forKey: .sp) ?? .wake
-            lp = try c.decodeIfPresent(ButtonAndTapAction.self, forKey: .lp) ?? .nothing
+            st = (try? c.decodeIfPresent(ButtonAndTapAction.self, forKey: .st)) ?? .nothing
+            dt = (try? c.decodeIfPresent(ButtonAndTapAction.self, forKey: .dt)) ?? .wake
+            lt = (try? c.decodeIfPresent(ButtonAndTapAction.self, forKey: .lt)) ?? .haptics
+            sp = (try? c.decodeIfPresent(ButtonAndTapAction.self, forKey: .sp)) ?? .wake
+            lp = (try? c.decodeIfPresent(ButtonAndTapAction.self, forKey: .lp)) ?? .nothing
             rangeCutoffs = try c.decodeIfPresent([Int].self, forKey: .rangeCutoffs) ?? Preset.defaultRangeCutoffs
             rangeHaptics = try c.decodeIfPresent([String].self, forKey: .rangeHaptics) ?? Preset.defaultRangeHaptics
             rangePlayHaptic = try c.decodeIfPresent([Bool].self, forKey: .rangePlayHaptic) ?? Preset.defaultRangePlayHaptic
