@@ -25,7 +25,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         var pat: String     // pattern name
 
         static let allPatterns: [String] = [
-            "simple_pulse", "single_buzz", "single_buzz_short", "single_buzz_long", "triple_tap",
+            "simple_pulse", "single_buzz", "single_buzz_short", "single_buzz_long", "double_buzz", "triple_buzz", "triple_tap",
             "heartbeat", "urgent", "linear_ramp", "short_long", "long_short",
             "double_tap", "notification", "notification_single", "bounce", "rbounce", "countdown",
             "stutter", "stutter_short", "stutter_long", "sos", "fanfare", "uprising_sweep"
@@ -33,10 +33,10 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
         static let defaults: [HapticAlert] = [
             HapticAlert(enabled: false, op: "<", thr: 90, pat: "single_buzz"),
-            HapticAlert(enabled: false, op: ">", thr: 180, pat: "single_buzz"),
-            HapticAlert(enabled: false, op: ">", thr: 180, pat: "single_buzz"),
-            HapticAlert(enabled: false, op: ">", thr: 180, pat: "single_buzz"),
-            HapticAlert(enabled: false, op: ">", thr: 180, pat: "single_buzz"),
+            HapticAlert(enabled: false, op: "<", thr: 90, pat: "single_buzz"),
+            HapticAlert(enabled: false, op: "<", thr: 90, pat: "single_buzz"),
+            HapticAlert(enabled: false, op: "<", thr: 90, pat: "single_buzz"),
+            HapticAlert(enabled: false, op: "<", thr: 90, pat: "single_buzz"),
         ]
     }
 
@@ -89,17 +89,17 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
         static let defaultRangeCutoffs: [Int] = [70, 100, 200, 300]
         static let defaultRangeHaptics: [String] = [
-            "single_buzz", "notification", "notification_single", "stutter", "stutter_long"
+            "single_buzz", "notification", "notification_single", "stutter_short", "stutter"
         ]
         static let defaultRangePlayHaptic: [Bool] = [true, true, false, false, false]
 
         static let defaultPreset = Preset(
-            name: "default",
+            name: "Default",
             wakeOnReading: false,
             displayBrightness: 2,
             displayAlwaysOn: false,
             displaySleepSec: 10,
-            forecaster: .trend,
+            forecaster: .none,
             od: 10,
             nd: 30,
             st: .nothing,
