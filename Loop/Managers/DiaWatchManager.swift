@@ -25,15 +25,19 @@ final class DiaWatchManager: NSObject, ObservableObject {
         var pat: String     // pattern name
 
         static let allPatterns: [String] = [
-            "simple_pulse", "notification_single", "single_buzz", "triple_tap",
+            "simple_pulse", "single_buzz", "single_buzz_short", "single_buzz_long", "triple_tap",
             "heartbeat", "urgent", "linear_ramp", "short_long", "long_short",
-            "double_tap", "notification", "bounce", "rbounce", "countdown",
-            "stutter", "sos", "fanfare", "uprising_sweep"
+            "double_tap", "notification", "notification_single", "bounce", "rbounce", "countdown",
+            "stutter", "stutter_short", "stutter_long", "sos", "fanfare", "uprising_sweep"
         ]
 
-        static let defaults: [HapticAlert] = (0..<5).map { _ in
-            HapticAlert(enabled: false, op: ">", thr: 180, pat: "single_buzz")
-        }
+        static let defaults: [HapticAlert] = [
+            HapticAlert(enabled: false, op: "<", thr: 90, pat: "single_buzz"),
+            HapticAlert(enabled: false, op: ">", thr: 180, pat: "single_buzz"),
+            HapticAlert(enabled: false, op: ">", thr: 180, pat: "single_buzz"),
+            HapticAlert(enabled: false, op: ">", thr: 180, pat: "single_buzz"),
+            HapticAlert(enabled: false, op: ">", thr: 180, pat: "single_buzz"),
+        ]
     }
 
     // MARK: - Preset model
@@ -85,9 +89,9 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
         static let defaultRangeCutoffs: [Int] = [70, 100, 200, 300]
         static let defaultRangeHaptics: [String] = [
-            "sos", "notification", "single_buzz", "notification", "sos"
+            "single_buzz", "notification", "notification_single", "stutter", "stutter_long"
         ]
-        static let defaultRangePlayHaptic: [Bool] = [true, true, true, true, true]
+        static let defaultRangePlayHaptic: [Bool] = [true, true, false, false, false]
 
         static let defaultPreset = Preset(
             name: "default",
@@ -95,21 +99,21 @@ final class DiaWatchManager: NSObject, ObservableObject {
             displayBrightness: 2,
             displayAlwaysOn: false,
             displaySleepSec: 10,
-            forecaster: .none,
+            forecaster: .trend,
             od: 10,
             nd: 30,
             st: .nothing,
             dt: .wake,
-            lt: .haptics,
+            lt: .nothing,
             sp: .wake,
-            lp: .nothing,
+            lp: .haptics,
             rangeCutoffs: defaultRangeCutoffs,
             rangeHaptics: defaultRangeHaptics,
             rangePlayHaptic: defaultRangePlayHaptic,
             hapticAlerts: HapticAlert.defaults
         )
 
-        init(name: String, wakeOnReading: Bool, displayBrightness: Int = 2, displayAlwaysOn: Bool = false, displaySleepSec: Int = 10, forecaster: Forecaster = .none, od: Int = 10, nd: Int = 30, st: ButtonAndTapAction = .nothing, dt: ButtonAndTapAction = .wake, lt: ButtonAndTapAction = .haptics, sp: ButtonAndTapAction = .wake, lp: ButtonAndTapAction = .nothing, rangeCutoffs: [Int] = Preset.defaultRangeCutoffs, rangeHaptics: [String] = Preset.defaultRangeHaptics, rangePlayHaptic: [Bool] = Preset.defaultRangePlayHaptic, hapticAlerts: [HapticAlert]) {
+        init(name: String, wakeOnReading: Bool, displayBrightness: Int = 2, displayAlwaysOn: Bool = false, displaySleepSec: Int = 10, forecaster: Forecaster = .trend, od: Int = 10, nd: Int = 30, st: ButtonAndTapAction = .nothing, dt: ButtonAndTapAction = .wake, lt: ButtonAndTapAction = .nothing, sp: ButtonAndTapAction = .wake, lp: ButtonAndTapAction = .haptics, rangeCutoffs: [Int] = Preset.defaultRangeCutoffs, rangeHaptics: [String] = Preset.defaultRangeHaptics, rangePlayHaptic: [Bool] = Preset.defaultRangePlayHaptic, hapticAlerts: [HapticAlert]) {
             self.name = name
             self.wakeOnReading = wakeOnReading
             self.displayBrightness = displayBrightness
@@ -136,14 +140,14 @@ final class DiaWatchManager: NSObject, ObservableObject {
             displayBrightness = try c.decodeIfPresent(Int.self, forKey: .displayBrightness) ?? 2
             displayAlwaysOn = try c.decodeIfPresent(Bool.self, forKey: .displayAlwaysOn) ?? false
             displaySleepSec = try c.decodeIfPresent(Int.self, forKey: .displaySleepSec) ?? 10
-            forecaster = (try? c.decodeIfPresent(Forecaster.self, forKey: .forecaster)) ?? .none
+            forecaster = (try? c.decodeIfPresent(Forecaster.self, forKey: .forecaster)) ?? .trend
             od = try c.decodeIfPresent(Int.self, forKey: .od) ?? 10
             nd = try c.decodeIfPresent(Int.self, forKey: .nd) ?? 30
             st = (try? c.decodeIfPresent(ButtonAndTapAction.self, forKey: .st)) ?? .nothing
             dt = (try? c.decodeIfPresent(ButtonAndTapAction.self, forKey: .dt)) ?? .wake
-            lt = (try? c.decodeIfPresent(ButtonAndTapAction.self, forKey: .lt)) ?? .haptics
+            lt = (try? c.decodeIfPresent(ButtonAndTapAction.self, forKey: .lt)) ?? .nothing
             sp = (try? c.decodeIfPresent(ButtonAndTapAction.self, forKey: .sp)) ?? .wake
-            lp = (try? c.decodeIfPresent(ButtonAndTapAction.self, forKey: .lp)) ?? .nothing
+            lp = (try? c.decodeIfPresent(ButtonAndTapAction.self, forKey: .lp)) ?? .haptics
             rangeCutoffs = try c.decodeIfPresent([Int].self, forKey: .rangeCutoffs) ?? Preset.defaultRangeCutoffs
             rangeHaptics = try c.decodeIfPresent([String].self, forKey: .rangeHaptics) ?? Preset.defaultRangeHaptics
             rangePlayHaptic = try c.decodeIfPresent([Bool].self, forKey: .rangePlayHaptic) ?? Preset.defaultRangePlayHaptic
