@@ -1,6 +1,6 @@
 # DiaWatch BLE Integration
 
-Pushes CGM glucose readings from Loop to a PineTime watch running [DiaWatch](https://github.com/joaquimorg/DiaWatch) firmware over Bluetooth Low Energy, using the Nordic UART Service (NUS) protocol.
+Pushes CGM glucose readings from Loop to a PineTime watch running [DiaWatch](https://github.com/sarusso/DiaWatch) firmware over Bluetooth Low Energy, using the Nordic UART Service (NUS) protocol.
 
 ## How it works
 
