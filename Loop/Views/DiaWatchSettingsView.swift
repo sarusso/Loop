@@ -22,7 +22,7 @@ struct DiaWatchSettingsView: View {
     @State private var alertsDirty = false
     @State private var rangesDirty = false
 
-    private enum ActiveButton { case none, test, saveGeneral, saveAlerts, saveRanges, activatePreset, deletePreset, testHaptic, customCommand, getLog, getPrevLog, setTime, battery, freeMem, uptime, ctrlC }
+    private enum ActiveButton { case none, test, saveGeneral, saveAlerts, saveRanges, activatePreset, deletePreset, testHaptic, customCommand, getLog, getPrevLog, setTime, battery, freeMem, freeMemBlocks, uptime, ctrlC }
     @State private var activeButton: ActiveButton = .none
 
     @FocusState private var presetNameFocused: Bool
@@ -53,6 +53,7 @@ struct DiaWatchSettingsView: View {
     @State private var setTimeStatus: ButtonStatus? = nil
     @State private var batteryStatus: ButtonStatus? = nil
     @State private var freeMemStatus: ButtonStatus? = nil
+    @State private var freeMemBlocksStatus: ButtonStatus? = nil
     @State private var uptimeStatus: ButtonStatus? = nil
     @State private var ctrlCStatus: ButtonStatus? = nil
     @State private var getLogStatus: ButtonStatus? = nil
@@ -229,6 +230,7 @@ struct DiaWatchSettingsView: View {
             case .setTime:       text = isError ? (manager.lastPushError ?? "Failed") : "Set!"
             case .battery:       text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
             case .freeMem:       text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
+            case .freeMemBlocks: text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
             case .uptime:        text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
             case .ctrlC:         text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
             case .none:          return
@@ -272,6 +274,9 @@ struct DiaWatchSettingsView: View {
             case .freeMem:
                 freeMemStatus = status
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { freeMemStatus = nil }
+            case .freeMemBlocks:
+                freeMemBlocksStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { freeMemBlocksStatus = nil }
             case .uptime:
                 uptimeStatus = status
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { uptimeStatus = nil }
@@ -867,7 +872,7 @@ struct DiaWatchSettingsView: View {
                 status: batteryStatus
             ) {
                 activeButton = .battery
-                manager.sendCustomCommand("import wasp;watch.battery.level()")
+                manager.sendCustomCommand("watch.battery.level()")
             }
 
             actionRow(
@@ -877,7 +882,17 @@ struct DiaWatchSettingsView: View {
                 status: freeMemStatus
             ) {
                 activeButton = .freeMem
-                manager.sendCustomCommand("import gc;gc.mem_free()")
+                manager.sendCustomCommand("wasp.get_mem_free()")
+            }
+
+            actionRow(
+                label: "Get free mem blocks",
+                id: .freeMemBlocks,
+                dirty: false,
+                status: freeMemBlocksStatus
+            ) {
+                activeButton = .freeMemBlocks
+                manager.sendCustomCommand("wasp.get_mem_free_blocks()")
             }
 
             actionRow(
@@ -887,7 +902,7 @@ struct DiaWatchSettingsView: View {
                 status: uptimeStatus
             ) {
                 activeButton = .uptime
-                manager.sendCustomCommand("import wasp;wasp.uptime()/3600")
+                manager.sendCustomCommand("wasp.uptime()/3600")
             }
 
             // NOTE: Do NOT remove these commented-out log buttons. Keep them here
@@ -900,7 +915,7 @@ struct DiaWatchSettingsView: View {
             //     status: getLogStatus
             // ) {
             //     activeButton = .getLog
-            //     manager.sendCustomCommand("import wasp; wasp.log_dump()")
+            //     manager.sendCustomCommand("wasp.log_dump()")
             // }
             //
             // actionRow(
@@ -910,7 +925,7 @@ struct DiaWatchSettingsView: View {
             //     status: getPrevLogStatus
             // ) {
             //     activeButton = .getPrevLog
-            //     manager.sendCustomCommand("import wasp; wasp.log_pre_dump()")
+            //     manager.sendCustomCommand("wasp.log_pre_dump()")
             // }
 
             actionRow(
