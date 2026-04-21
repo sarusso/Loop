@@ -22,7 +22,7 @@ struct DiaWatchSettingsView: View {
     @State private var alertsDirty = false
     @State private var rangesDirty = false
 
-    private enum ActiveButton { case none, test, saveGeneral, saveAlerts, saveRanges, activatePreset, deletePreset, testHaptic, customCommand, setTime, battery, freeMem, uptime, ctrlC }
+    private enum ActiveButton { case none, test, saveGeneral, saveAlerts, saveRanges, activatePreset, deletePreset, testHaptic, customCommand, getLog, getPrevLog, setTime, battery, freeMem, uptime, ctrlC }
     @State private var activeButton: ActiveButton = .none
 
     @FocusState private var presetNameFocused: Bool
@@ -55,6 +55,8 @@ struct DiaWatchSettingsView: View {
     @State private var freeMemStatus: ButtonStatus? = nil
     @State private var uptimeStatus: ButtonStatus? = nil
     @State private var ctrlCStatus: ButtonStatus? = nil
+    @State private var getLogStatus: ButtonStatus? = nil
+    @State private var getPrevLogStatus: ButtonStatus? = nil
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -222,6 +224,8 @@ struct DiaWatchSettingsView: View {
             case .deletePreset:   text = isError ? (manager.lastPushError ?? "Failed") : "Deleted!"
             case .testHaptic:    text = isError ? (manager.lastPushError ?? "Failed") : "Played!"
             case .customCommand: text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
+            case .getLog:        text = isError ? (manager.lastPushError ?? "Failed") : "Done!"
+            case .getPrevLog:    text = isError ? (manager.lastPushError ?? "Failed") : "Done!"
             case .setTime:       text = isError ? (manager.lastPushError ?? "Failed") : "Set!"
             case .battery:       text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
             case .freeMem:       text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
@@ -274,6 +278,12 @@ struct DiaWatchSettingsView: View {
             case .ctrlC:
                 ctrlCStatus = status
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { ctrlCStatus = nil }
+            case .getLog:
+                getLogStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { getLogStatus = nil }
+            case .getPrevLog:
+                getPrevLogStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { getPrevLogStatus = nil }
             case .none: break
             }
         }
@@ -879,6 +889,29 @@ struct DiaWatchSettingsView: View {
                 activeButton = .uptime
                 manager.sendCustomCommand("import wasp;wasp.uptime()/3600")
             }
+
+            // NOTE: Do NOT remove these commented-out log buttons. Keep them here
+            // for quick re-enablement when debugging watch-side issues.
+            //
+            // actionRow(
+            //     label: "Get log",
+            //     id: .getLog,
+            //     dirty: false,
+            //     status: getLogStatus
+            // ) {
+            //     activeButton = .getLog
+            //     manager.sendCustomCommand("import wasp; wasp.log_dump()")
+            // }
+            //
+            // actionRow(
+            //     label: "Get prev log",
+            //     id: .getPrevLog,
+            //     dirty: false,
+            //     status: getPrevLogStatus
+            // ) {
+            //     activeButton = .getPrevLog
+            //     manager.sendCustomCommand("import wasp; wasp.log_pre_dump()")
+            // }
 
             actionRow(
                 label: "Send Ctrl-C",
