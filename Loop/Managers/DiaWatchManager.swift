@@ -551,7 +551,6 @@ final class DiaWatchManager: NSObject, ObservableObject {
         sendTimeoutTimer = Timer.scheduledTimer(withTimeInterval: Self.sendTimeout, repeats: false) { [weak self] _ in
             guard let self, self.isSending else { return }
             self.log.error("DiaWatch send timed out after %{public}g s", Self.sendTimeout)
-            if let p = self.peripheral { self.central.cancelPeripheralConnection(p) }
             self.abortSend(error: "Send timed out")
         }
     }
@@ -612,6 +611,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         memoryRetryTimer = nil
         isSending = false
         pendingChunks = []
+        if let p = peripheral { central.cancelPeripheralConnection(p) }
         peripheral = nil
         rxCharacteristic = nil
         onTransmissionComplete = nil
