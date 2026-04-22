@@ -170,7 +170,6 @@ final class DiaWatchManager: NSObject, ObservableObject {
         case sending
         case awaitingResponse
         case purging
-        case retrying(attempt: Int, of: Int)
         case streaming
     }
 
@@ -217,11 +216,6 @@ final class DiaWatchManager: NSObject, ObservableObject {
     private var usePreamble: Bool = false
     private var promptTimer: Timer?
     private static let promptTimeout: TimeInterval = 5
-    private var memoryErrorRetries: Int = 0
-    private var isMemoryRetry: Bool = false
-    private var memoryRetryTimer: Timer?
-    private static let memoryRetryDelay: TimeInterval = 10
-    private static let memoryRetryMaxAttempts: Int = 3
     private var pendingCommandEcho: String?   // command text the REPL will echo back (no \r\n)
     private var echoDetected = false          // true once pendingCommandEcho seen in TX stream
     private var currentTransmissionMessage: String = ""
@@ -510,8 +504,6 @@ final class DiaWatchManager: NSObject, ObservableObject {
         currentTransmissionMessage = message
         pendingCommandEcho = message.trimmingCharacters(in: .whitespacesAndNewlines)
         echoDetected = false
-        if !isMemoryRetry { memoryErrorRetries = 0 }
-        isMemoryRetry = false
         usePreamble = withPreamble
         // Preamble (\x03\x03) is now sent in probeForPrompt() before the \r probe,
         // not prepended to the message chunks.
@@ -607,8 +599,6 @@ final class DiaWatchManager: NSObject, ObservableObject {
         cancelPromptTimer()
         waitingForPrompt = false
         isStreaming = false
-        memoryRetryTimer?.invalidate()
-        memoryRetryTimer = nil
         isSending = false
         pendingChunks = []
         if let p = peripheral { central.cancelPeripheralConnection(p) }
@@ -852,26 +842,6 @@ extension DiaWatchManager: CBCentralManagerDelegate {
             } else {
                 isRetryAttempt = false
                 if !echoDetected { lastPushError = "No echo from watch" }
-
-                if bleResponse.range(of: "MemoryError", options: .caseInsensitive) != nil
-                    && memoryErrorRetries < Self.memoryRetryMaxAttempts {
-                    memoryErrorRetries += 1
-                    let retryMsg = currentTransmissionMessage
-                    let retryCompletion = onTransmissionComplete
-                    onTransmissionComplete = nil
-                    log.default("DiaWatch MemoryError — retry %{public}d/%{public}d in %{public}.0f s",
-                                memoryErrorRetries, Self.memoryRetryMaxAttempts, Self.memoryRetryDelay)
-                    isSending = true
-                    pushPhase = .retrying(attempt: memoryErrorRetries, of: Self.memoryRetryMaxAttempts)
-                    memoryRetryTimer = Timer.scheduledTimer(withTimeInterval: Self.memoryRetryDelay, repeats: false) { [weak self] _ in
-                        guard let self else { return }
-                        self.memoryRetryTimer = nil
-                        self.isSending = false
-                        self.isMemoryRetry = true
-                        self.beginTransmission(retryMsg, onComplete: retryCompletion)
-                    }
-                    return
-                }
 
                 onTransmissionComplete?()
                 onTransmissionComplete = nil
