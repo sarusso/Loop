@@ -172,6 +172,18 @@ final class DiaWatchManager: NSObject, ObservableObject {
         case streaming
     }
 
+    /// In-memory log entry for one BLE transmission. Capped to
+    /// `maxLogEntries`, newest first. Not persisted.
+    struct CommandLogEntry: Identifiable, Equatable {
+        let id = UUID()
+        let timestamp: Date
+        let command: String
+        let status: String        // "OK" or short error reason
+        let response: String      // full raw bleResponse at completion time
+        let isUserTriggered: Bool // gray border = drain (false), blue = user (true)
+        var isError: Bool { status != "OK" }
+    }
+
     @Published var pairedDeviceName: String?
     @Published var lastPushDate: Date?
     @Published var lastPushValue: Int?
@@ -186,6 +198,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
     @Published var presets: [Preset] = UserDefaults.standard.diaWatchPresets
     @Published var bleResponse: String = ""
     @Published var pendingReadingsCount: Int = 0
+    @Published var commandLog: [CommandLogEntry] = []
     @Published var transmissionsEnabled: Bool = UserDefaults.standard.diaWatchTransmissionsEnabled {
         didSet {
             UserDefaults.standard.diaWatchTransmissionsEnabled = transmissionsEnabled
@@ -205,7 +218,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
     private var receivedResponse = false
     private var responseSessionStarted = false
     private var replPromptCount = 0
-    private var transmissionQueue: [(message: String, onComplete: (() -> Void)?)] = []
+    private var transmissionQueue: [(message: String, onComplete: (() -> Void)?, isUserTriggered: Bool)] = []
     private var scanTimer: Timer?
     private var sendTimeoutTimer: Timer?
     private static let sendTimeout: TimeInterval = 15
@@ -224,6 +237,13 @@ final class DiaWatchManager: NSObject, ObservableObject {
     // survives app restarts.
     static let maxBackfillInterval: TimeInterval = 2 * 60 * 60
     private var isDrainingReadings = false
+
+    // Command-log state. Captured at beginTransmission time, snapshotted
+    // into a CommandLogEntry when the transmission resolves (success,
+    // failure, or abort).
+    private static let maxLogEntries = 1000
+    private var currentLogCommand: String?
+    private var currentLogIsUserTriggered: Bool = false
 
     private weak var deviceManager: DeviceDataManager?
     private let log = DiagnosticLog(category: "DiaWatchManager")
@@ -394,7 +414,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         lastSentMgdl = mgdl
         log.default("Sending DiaWatch reading (test): %{public}@", message)
         let readingDate = Date(timeIntervalSince1970: TimeInterval(ts))
-        beginTransmission(message) { [weak self] in
+        beginTransmission(message, isUserTriggered: true) { [weak self] in
             guard let self else { return }
             self.lastPushDate = Date()
             self.lastPushValue = self.lastSentMgdl
@@ -419,7 +439,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let rangesMsg = "GB({\"app\":\"dw\",\"t\":\"s_r\",\"p\":\(index),\"rc\":\(rcJSON),\"rh\":\(rhJSON),\"ph\":\(phJSON)})\r\n"
 
         log.default("Sending DiaWatch preset %{public}d ranges", index)
-        beginTransmission(rangesMsg) { [weak self] in
+        beginTransmission(rangesMsg, isUserTriggered: true) { [weak self] in
             guard let self else { return }
             self.evaluateResult(rejectMessage: "Watch rejected ranges")
             if self.lastPushError == nil { UserDefaults.standard.diaWatchPresets = self.presets }
@@ -436,7 +456,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let configMsg = "GB({\"app\":\"dw\",\"t\":\"s_c\",\"p\":\(index),\"n\":\"\(preset.name)\",\"rw\":\(preset.wakeOnReading ? 1 : 0),\"db\":\(preset.displayBrightness),\"ds\":\(dsValue),\"fc\":\(fcValue),\"od\":\(preset.od),\"nd\":\(preset.nd),\"st\":\(preset.st.rawValue),\"dt\":\(preset.dt.rawValue),\"lt\":\(preset.lt.rawValue),\"sp\":\(preset.sp.rawValue),\"lp\":\(preset.lp.rawValue)})\r\n"
 
         log.default("Sending DiaWatch preset %{public}d general config", index)
-        beginTransmission(configMsg) { [weak self] in
+        beginTransmission(configMsg, isUserTriggered: true) { [weak self] in
             guard let self else { return }
             self.evaluateResult(rejectMessage: "Watch rejected preset config")
             if self.lastPushError == nil { UserDefaults.standard.diaWatchPresets = self.presets }
@@ -448,14 +468,14 @@ final class DiaWatchManager: NSObject, ObservableObject {
         guard !isSending, index < presets.count else { return }
 
         let preset = presets[index]
-        var commands: [(String, (() -> Void)?)] = preset.hapticAlerts.enumerated().map { alertIdx, alert in
+        var commands: [(message: String, onComplete: (() -> Void)?, isUserTriggered: Bool)] = preset.hapticAlerts.enumerated().map { alertIdx, alert in
             let msg = alert.enabled
                 ? "GB({\"app\":\"dw\",\"t\":\"s_a\",\"p\":\(index),\"idx\":\(alertIdx),\"op\":\"\(alert.op)\",\"thr\":\(alert.thr),\"pat\":\"\(alert.pat)\"})\r\n"
                 : "GB({\"app\":\"dw\",\"t\":\"d_a\",\"p\":\(index),\"idx\":\(alertIdx)})\r\n"
-            return (msg, nil)
+            return (message: msg, onComplete: nil, isUserTriggered: true)
         }
 
-        commands[commands.count - 1].1 = { [weak self] in
+        commands[commands.count - 1].onComplete = { [weak self] in
             guard let self else { return }
             self.evaluateResult(rejectMessage: "Watch rejected alert config")
             if self.lastPushError == nil { UserDefaults.standard.diaWatchPresets = self.presets }
@@ -464,7 +484,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
         transmissionQueue = Array(commands.dropFirst())
         log.default("Sending DiaWatch preset %{public}d alerts", index)
-        beginTransmission(commands[0].0, onComplete: commands[0].1)
+        beginTransmission(commands[0].message, isUserTriggered: true, onComplete: commands[0].onComplete)
     }
 
     static let maxPresets = 4
@@ -499,7 +519,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         guard isPersistedToPhone else { return }
 
         log.default("Deleting DiaWatch preset %{public}d", lastIdx)
-        beginTransmission("GB({\"app\":\"dw\",\"t\":\"d_p\",\"p\":\(lastIdx)})\r\n") { [weak self] in
+        beginTransmission("GB({\"app\":\"dw\",\"t\":\"d_p\",\"p\":\(lastIdx)})\r\n", isUserTriggered: true) { [weak self] in
             guard let self else { return }
             self.evaluateResult(rejectMessage: "Watch rejected preset delete")
             self.log.default("DiaWatch preset %{public}d deleted", lastIdx)
@@ -510,7 +530,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         guard !isSending, index < presets.count else { return }
         let message = "GB({\"app\":\"dw\",\"t\":\"a_p\",\"p\":\(index)})\r\n"
         log.default("Activating DiaWatch preset %{public}d", index)
-        beginTransmission(message) { [weak self] in
+        beginTransmission(message, isUserTriggered: true) { [weak self] in
             guard let self else { return }
             self.evaluateResult(rejectMessage: "Watch rejected preset activation")
         }
@@ -534,7 +554,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let message = "GB({\"app\":\"dw\",\"t\":\"s_t\",\"lt\":[\(y),\(mo),\(d),\(h),\(mi),\(s)],\"ff\":\(ff)})\r\n"
         log.default("Setting DiaWatch time: lt=[%{public}d,%{public}d,%{public}d,%{public}d,%{public}d,%{public}d] ff=%{public}d",
                     y, mo, d, h, mi, s, ff)
-        beginTransmission(message) { [weak self] in
+        beginTransmission(message, isUserTriggered: true) { [weak self] in
             guard let self else { return }
             self.evaluateResult(rejectMessage: "Watch rejected set time")
             self.log.default("DiaWatch set time complete")
@@ -547,7 +567,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         guard !isSending, !text.isEmpty else { return }
         let message = text.hasSuffix("\r\n") ? text : text + "\r\n"
         log.default("Sending DiaWatch custom command: %{public}@", text)
-        beginTransmission(message) { [weak self] in
+        beginTransmission(message, isUserTriggered: true) { [weak self] in
             guard let self else { return }
             self.lastPushError = self.receivedResponse ? nil : "No response from watch"
             self.log.default("DiaWatch custom command complete")
@@ -578,7 +598,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         guard !isSending else { return }
         let message = "import wasp; wasp.Haptics.\(name)()\r\n"
         log.default("Sending DiaWatch test haptic: %{public}@", name)
-        beginTransmission(message) { [weak self] in
+        beginTransmission(message, isUserTriggered: true) { [weak self] in
             guard let self else { return }
             self.lastPushError = self.receivedResponse ? nil : "No response from watch"
             self.log.default("DiaWatch test haptic complete")
@@ -587,14 +607,18 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
     // MARK: - Base transmission
 
-    private func beginTransmission(_ message: String, onComplete: (() -> Void)? = nil) {
+    private func beginTransmission(_ message: String, isUserTriggered: Bool = false, onComplete: (() -> Void)? = nil) {
         guard !isSending else {
             if transmissionsEnabled {
                 log.default("DiaWatch enqueue (busy) [%{public}d bytes]: %{public}@", message.utf8.count, message)
-                transmissionQueue.append((message: message, onComplete: onComplete))
+                transmissionQueue.append((message: message, onComplete: onComplete, isUserTriggered: isUserTriggered))
             }
             return
         }
+
+        // Pre-flight log capture so simulateNoDevice can still log an entry.
+        currentLogCommand = message
+        currentLogIsUserTriggered = isUserTriggered
 
         guard UserDefaults.standard.diaWatchPeripheralID != nil else {
             simulateNoDevice()
@@ -632,9 +656,29 @@ final class DiaWatchManager: NSObject, ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
             guard let self else { return }
             self.lastPushError = "No device paired"
+            self.appendCurrentCommandLogEntry(status: "No device paired", response: "")
             self.isSending = false
             self.hasTransmitted = true
             self.pushPhase = .idle
+        }
+    }
+
+    /// Snapshot the current transmission's captured fields into a log entry
+    /// and prepend it. Clears `currentLogCommand` so re-entrant
+    /// beginTransmission calls (e.g. drain advancing) don't double-log.
+    private func appendCurrentCommandLogEntry(status: String, response: String) {
+        guard let cmd = currentLogCommand else { return }
+        let entry = CommandLogEntry(
+            timestamp: Date(),
+            command: cmd,
+            status: status,
+            response: response,
+            isUserTriggered: currentLogIsUserTriggered
+        )
+        currentLogCommand = nil
+        commandLog.insert(entry, at: 0)
+        if commandLog.count > Self.maxLogEntries {
+            commandLog.removeLast(commandLog.count - Self.maxLogEntries)
         }
     }
 
@@ -683,6 +727,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         transmissionQueue = []
         pendingCommandEcho = nil
         echoDetected = false
+        appendCurrentCommandLogEntry(status: error, response: bleResponse)
         lastPushError = error
         hasTransmitted = true
         pushPhase = .idle
@@ -923,26 +968,46 @@ extension DiaWatchManager: CBCentralManagerDelegate {
             log.error("DiaWatch disconnected mid-send: %{public}@", msg)
             onTransmissionComplete = nil
             isDrainingReadings = false
+            appendCurrentCommandLogEntry(status: msg, response: bleResponse)
             lastPushError = msg
             hasTransmitted = true
             pushPhase = .idle
         } else if !transmissionQueue.isEmpty {
+            // Log the just-finished command, then start the next queued one.
+            let queueStatus = lastPushError ?? (echoDetected ? "OK" : "No echo from watch")
+            appendCurrentCommandLogEntry(status: queueStatus, response: bleResponse)
             let next = transmissionQueue.removeFirst()
             log.default("Sending DiaWatch queued command")
-            beginTransmission(next.message, onComplete: next.onComplete)
+            beginTransmission(next.message, isUserTriggered: next.isUserTriggered, onComplete: next.onComplete)
         } else {
             if !echoDetected { lastPushError = "No echo from watch" }
-            // Capture-and-clear BEFORE firing: the completion may re-enter
-            // beginTransmission (e.g. drain advancing to the next reading),
-            // which sets a fresh onTransmissionComplete and pushPhase. If we
-            // cleared them after firing, we'd clobber the new closure and
-            // wedge the drain — silently, since the new completion never
-            // gets called and isDrainingReadings stays true.
+            // Snapshot log fields BEFORE firing the completion: the completion
+            // may re-enter beginTransmission (e.g. drain advancing to the next
+            // reading), which overwrites currentLogCommand. We log AFTER the
+            // completion runs so lastPushError reflects the completion's
+            // verdict, but using the snapshotted command/response/origin.
             let completion = onTransmissionComplete
             onTransmissionComplete = nil
             hasTransmitted = true
             pushPhase = .idle
+            let snapshotCmd = currentLogCommand
+            let snapshotIsUser = currentLogIsUserTriggered
+            let snapshotResponse = bleResponse
+            currentLogCommand = nil
             completion?()
+            if let cmd = snapshotCmd {
+                let entry = CommandLogEntry(
+                    timestamp: Date(),
+                    command: cmd,
+                    status: lastPushError ?? "OK",
+                    response: snapshotResponse,
+                    isUserTriggered: snapshotIsUser
+                )
+                commandLog.insert(entry, at: 0)
+                if commandLog.count > Self.maxLogEntries {
+                    commandLog.removeLast(commandLog.count - Self.maxLogEntries)
+                }
+            }
         }
     }
 }

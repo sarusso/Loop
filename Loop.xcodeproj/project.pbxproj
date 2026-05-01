@@ -104,6 +104,7 @@
 		4328E0351CFC0AE100E199AA /* WatchDataManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4328E0341CFC0AE100E199AA /* WatchDataManager.swift */; };
 		AA00000200000000DEADBEEF /* DiaWatchManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000100000000DEADBEEF /* DiaWatchManager.swift */; };
 		AA00000400000000DEADBEEF /* DiaWatchSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000300000000DEADBEEF /* DiaWatchSettingsView.swift */; };
+		AA00000600000000DEADBEEF /* DiaWatchCommandLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000500000000DEADBEEF /* DiaWatchCommandLogView.swift */; };
 		432CF87520D8AC950066B889 /* NSUserDefaults+WatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4328E0231CFBE2C500E199AA /* NSUserDefaults+WatchApp.swift */; };
 		432E73CB1D24B3D6009AD15D /* RemoteDataServicesManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 432E73CA1D24B3D6009AD15D /* RemoteDataServicesManager.swift */; };
 		433EA4C41D9F71C800CD78FB /* CommandResponseViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 433EA4C31D9F71C800CD78FB /* CommandResponseViewController.swift */; };
@@ -842,6 +843,7 @@
 		4328E0341CFC0AE100E199AA /* WatchDataManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; lineEnding = 0; path = WatchDataManager.swift; sourceTree = "<group>"; xcLanguageSpecificationIdentifier = xcode.lang.swift; };
 		AA00000100000000DEADBEEF /* DiaWatchManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiaWatchManager.swift; sourceTree = "<group>"; };
 		AA00000300000000DEADBEEF /* DiaWatchSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiaWatchSettingsView.swift; sourceTree = "<group>"; };
+		AA00000500000000DEADBEEF /* DiaWatchCommandLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiaWatchCommandLogView.swift; sourceTree = "<group>"; };
 		432E73CA1D24B3D6009AD15D /* RemoteDataServicesManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = RemoteDataServicesManager.swift; sourceTree = "<group>"; };
 		4337615E1D52F487004A3647 /* GlucoseHUDView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = GlucoseHUDView.swift; sourceTree = "<group>"; };
 		433EA4C31D9F71C800CD78FB /* CommandResponseViewController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CommandResponseViewController.swift; sourceTree = "<group>"; };
@@ -1992,6 +1994,7 @@
 				439706E522D2E84900C81566 /* PredictionSettingTableViewCell.swift */,
 				1DE09BA824A3E23F009EE9F9 /* SettingsView.swift */,
 				AA00000300000000DEADBEEF /* DiaWatchSettingsView.swift */,
+				AA00000500000000DEADBEEF /* DiaWatchCommandLogView.swift */,
 				DDC389FB2A2BC6670066E2E8 /* SettingsView+algorithmExperimentsSection.swift */,
 				C1DE5D22251BFC4D00439E49 /* SimpleBolusView.swift */,
 				43F64DD81D9C92C900D24DC6 /* TitleSubtitleTableViewCell.swift */,
@@ -3525,6 +3528,7 @@
 				A9DCF32A25B0FABF00C89088 /* LoopUIColorPalette+Default.swift in Sources */,
 				1DDE273E24AEA4B000796622 /* SettingsView.swift in Sources */,
 				AA00000400000000DEADBEEF /* DiaWatchSettingsView.swift in Sources */,
+				AA00000600000000DEADBEEF /* DiaWatchCommandLogView.swift in Sources */,
 				A9B607B0247F000F00792BE4 /* UserNotifications+Loop.swift in Sources */,
 				43F89CA322BDFBBD006BB54E /* UIActivityIndicatorView.swift in Sources */,
 				A999D40624663D18004C89D4 /* PumpManagerError.swift in Sources */,

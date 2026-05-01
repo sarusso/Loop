@@ -1037,6 +1037,17 @@ struct DiaWatchSettingsView: View {
                 }
             }
             .padding(.vertical, 4)
+
+            NavigationLink(destination: DiaWatchCommandLogView(manager: manager)) {
+                HStack {
+                    Image(systemName: "list.bullet.rectangle")
+                    Text("Open command log")
+                    Spacer()
+                    Text("\(manager.commandLog.count)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
             }
         }
     }
