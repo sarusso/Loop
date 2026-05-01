@@ -64,7 +64,7 @@ struct DiaWatchSettingsView: View {
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateStyle = .none
-        f.timeStyle = .medium
+        f.timeStyle = .short
         return f
     }()
 
@@ -376,7 +376,10 @@ struct DiaWatchSettingsView: View {
                 HStack {
                     Text("Last push")
                     Spacer()
-                    if let value = manager.lastPushValue {
+                    if let value = manager.lastPushValue, let readingDate = manager.lastPushReadingDate {
+                        Text("\(Self.timeFormatter.string(from: readingDate)): \(value) mg/dL (sent \(Self.timeFormatter.string(from: date)))")
+                            .foregroundColor(.secondary)
+                    } else if let value = manager.lastPushValue {
                         Text("\(value) mg/dL at \(Self.timeFormatter.string(from: date))")
                             .foregroundColor(.secondary)
                     } else {

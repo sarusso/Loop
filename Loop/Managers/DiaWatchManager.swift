@@ -175,6 +175,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
     @Published var pairedDeviceName: String?
     @Published var lastPushDate: Date?
     @Published var lastPushValue: Int?
+    @Published var lastPushReadingDate: Date?
     @Published var lastPushError: String?
     @Published var isScanning: Bool = false
     @Published var discoveredDevices: [DiscoveredDevice] = []
@@ -359,7 +360,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let mgdl = Int(sample.quantity.doubleValue(for: .milligramsPerDeciliter))
         let trend = diaWatchTrend(from: deviceManager?.glucoseDisplay(for: sample)?.trendType)
         let ts = Int(sample.startDate.timeIntervalSince1970)
-        let message = "GB({\"app\":\"dw\",\"t\":\"r\",\"v\":\(mgdl),\"tr\":\"\(trend)\",\"ts\":\(ts)})\r\n"
+        let bf = remaining.count > 1
+        let message = "GB({\"app\":\"dw\",\"t\":\"r\",\"v\":\(mgdl),\"tr\":\"\(trend)\",\"ts\":\(ts),\"bf\":\(bf)})\r\n"
         log.default("Sending DiaWatch reading: %{public}@", message)
         beginTransmission(message) { [weak self] in
             guard let self else { return }
@@ -373,6 +375,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
                 self.lastSentMgdl = mgdl
                 self.lastPushDate = Date()
                 self.lastPushValue = mgdl
+                self.lastPushReadingDate = sample.startDate
                 self.pendingReadingsCount = max(0, self.pendingReadingsCount - 1)
                 self.log.default("DiaWatch push complete (ts=%{public}d)", ts)
                 self.sendNextInDrain(remaining.dropFirst())
@@ -387,13 +390,15 @@ final class DiaWatchManager: NSObject, ObservableObject {
     }
 
     private func sendOneOffReading(mgdl: Int, trend: String, ts: Int) {
-        let message = "GB({\"app\":\"dw\",\"t\":\"r\",\"v\":\(mgdl),\"tr\":\"\(trend)\",\"ts\":\(ts)})\r\n"
+        let message = "GB({\"app\":\"dw\",\"t\":\"r\",\"v\":\(mgdl),\"tr\":\"\(trend)\",\"ts\":\(ts),\"bf\":false})\r\n"
         lastSentMgdl = mgdl
         log.default("Sending DiaWatch reading (test): %{public}@", message)
+        let readingDate = Date(timeIntervalSince1970: TimeInterval(ts))
         beginTransmission(message) { [weak self] in
             guard let self else { return }
             self.lastPushDate = Date()
             self.lastPushValue = self.lastSentMgdl
+            self.lastPushReadingDate = readingDate
             self.evaluateResult(rejectMessage: "Unexpected watch response")
             if self.lastPushError == nil && !self.bleResponse.contains("reading received") {
                 self.lastPushError = "Unexpected watch response"
@@ -737,6 +742,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         pairedDeviceName = nil
         lastPushDate = nil
         lastPushValue = nil
+        lastPushReadingDate = nil
         lastPushError = nil
         bleResponse = ""
         log.default("Forgot DiaWatch device")
