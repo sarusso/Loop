@@ -169,7 +169,6 @@ final class DiaWatchManager: NSObject, ObservableObject {
         case connecting
         case sending
         case awaitingResponse
-        case purging
         case streaming
     }
 
@@ -185,7 +184,6 @@ final class DiaWatchManager: NSObject, ObservableObject {
     @Published var isStreaming: Bool = false
     @Published var presets: [Preset] = UserDefaults.standard.diaWatchPresets
     @Published var bleResponse: String = ""
-    @Published var purgeEnabled: Bool = false
     @Published var transmissionsEnabled: Bool = UserDefaults.standard.diaWatchTransmissionsEnabled {
         didSet {
             UserDefaults.standard.diaWatchTransmissionsEnabled = transmissionsEnabled
@@ -213,16 +211,11 @@ final class DiaWatchManager: NSObject, ObservableObject {
     private static let responseInitialTimeout: TimeInterval = 20  // max wait for first byte
     private static let responseIdleTimeout: TimeInterval = 1.5    // disconnect after this much silence
     private var waitingForPrompt: Bool = false
-    private var usePreamble: Bool = false
+    private var sentCtrlC: Bool = false
     private var promptTimer: Timer?
     private static let promptTimeout: TimeInterval = 5
     private var pendingCommandEcho: String?   // command text the REPL will echo back (no \r\n)
     private var echoDetected = false          // true once pendingCommandEcho seen in TX stream
-    private var currentTransmissionMessage: String = ""
-    private var purgeTimer: Timer?
-    private var pendingRetryMessage: String?
-    private var pendingRetryCompletion: (() -> Void)?
-    private var isRetryAttempt = false   // true during the \x03\x03 retry; no further purge on failure
 
     private weak var deviceManager: DeviceDataManager?
     private let log = DiagnosticLog(category: "DiaWatchManager")
@@ -483,7 +476,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
     // MARK: - Base transmission
 
-    private func beginTransmission(_ message: String, onComplete: (() -> Void)? = nil, withPreamble: Bool = false) {
+    private func beginTransmission(_ message: String, onComplete: (() -> Void)? = nil) {
         guard !isSending else {
             if transmissionsEnabled {
                 log.default("DiaWatch enqueue (busy) [%{public}d bytes]: %{public}@", message.utf8.count, message)
@@ -501,12 +494,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
         log.default("DiaWatch TX [%{public}d bytes]: %{public}@", message.utf8.count, message)
 
-        currentTransmissionMessage = message
         pendingCommandEcho = message.trimmingCharacters(in: .whitespacesAndNewlines)
         echoDetected = false
-        usePreamble = withPreamble
-        // Preamble (\x03\x03) is now sent in probeForPrompt() before the \r probe,
-        // not prepended to the message chunks.
         pendingChunks = stride(from: 0, to: msgData.count, by: 20).map {
             Data(msgData[$0 ..< min($0 + 20, msgData.count)])
         }
@@ -566,38 +555,12 @@ final class DiaWatchManager: NSObject, ObservableObject {
         responseTimer = nil
     }
 
-    private func cancelPurgeTimer() {
-        purgeTimer?.invalidate()
-        purgeTimer = nil
-        pendingRetryMessage = nil
-        pendingRetryCompletion = nil
-    }
-
-    private func enterPurge(message: String, onComplete: (() -> Void)?) {
-        log.default("DiaWatch no echo — entering purge, retrying in 30 s")
-        pushPhase = .purging
-        isSending = true   // keeps queue accepting new items via beginTransmission guard
-        pendingRetryMessage = message
-        pendingRetryCompletion = onComplete
-        purgeTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: false) { [weak self] _ in
-            guard let self else { return }
-            self.purgeTimer = nil
-            guard let msg = self.pendingRetryMessage else { return }
-            let completion = self.pendingRetryCompletion
-            self.pendingRetryMessage = nil
-            self.pendingRetryCompletion = nil
-            self.isSending = false  // let beginTransmission proceed
-            self.isRetryAttempt = true
-            self.log.default("DiaWatch purge complete — retrying with \\x03\\x03 preamble")
-            self.beginTransmission(msg, onComplete: completion, withPreamble: true)
-        }
-    }
-
     private func abortSend(error: String) {
         cancelSendTimeout()
         cancelResponseTimer()
         cancelPromptTimer()
         waitingForPrompt = false
+        sentCtrlC = false
         isStreaming = false
         isSending = false
         pendingChunks = []
@@ -608,8 +571,6 @@ final class DiaWatchManager: NSObject, ObservableObject {
         transmissionQueue = []
         pendingCommandEcho = nil
         echoDetected = false
-        isRetryAttempt = false
-        cancelPurgeTimer()
         lastPushError = error
         hasTransmitted = true
         pushPhase = .idle
@@ -664,7 +625,6 @@ final class DiaWatchManager: NSObject, ObservableObject {
         isSending = false
         pendingChunks = []
         onTransmissionComplete = nil
-        cancelPurgeTimer()
         UserDefaults.standard.diaWatchPeripheralID = nil
         UserDefaults.standard.diaWatchDeviceName = nil
         pairedDeviceName = nil
@@ -677,25 +637,50 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
     // MARK: - REPL prompt probe
 
+    private enum PromptKind { case ready, continuation, none }
+
+    /// Scans the buffer for the LAST prompt token (>>> or ...). The last one
+    /// reflects the REPL's current state — earlier ones may be stale from a
+    /// previous traceback or from string content.
+    private func lastPromptIn(_ buffer: String) -> PromptKind {
+        let lastReady = buffer.range(of: ">>>", options: .backwards)
+        let lastCont  = buffer.range(of: "...", options: .backwards)
+        switch (lastReady, lastCont) {
+        case (nil, nil):   return .none
+        case (_, nil):     return .ready
+        case (nil, _):     return .continuation
+        case let (r?, c?): return r.lowerBound > c.lowerBound ? .ready : .continuation
+        }
+    }
+
     private func probeForPrompt() {
         guard let p = peripheral, let rx = rxCharacteristic else { return }
 
         waitingForPrompt = true
+        sentCtrlC = false
 
-        // If retrying with preamble, send \x03\x03 first to clear a stuck REPL,
-        // then \r to solicit the >>> prompt. On first attempt, send only \r —
-        // if the watch is booting, no prompt arrives and we time out safely
-        // instead of interrupting the boot sequence.
-        if usePreamble {
-            log.default("DiaWatch probing for REPL prompt (sending \\x03\\x03 + \\r)")
-            let preambleAndProbe = Data([0x03, 0x03, 0x0D])
-            p.writeValue(preambleAndProbe, for: rx, type: .withResponse)
-        } else {
-            log.default("DiaWatch probing for REPL prompt (sending \\r)")
-            let probe = Data([0x0D])
-            p.writeValue(probe, for: rx, type: .withResponse)
-        }
+        // Send a bare \r to solicit a prompt. If the REPL is at >>>, we
+        // proceed. If it answers with ... (continuation prompt — stuck in
+        // a multi-line input), we send Ctrl-C twice + \r to break out and
+        // wait for >>>. If the watch is booting, no prompt arrives and we
+        // time out safely instead of interrupting the boot sequence.
+        log.default("DiaWatch probing for REPL prompt (sending \\r)")
+        p.writeValue(Data([0x0D]), for: rx, type: .withResponse)
 
+        startPromptTimer()
+    }
+
+    private func sendCtrlCBreak() {
+        guard let p = peripheral, let rx = rxCharacteristic else { return }
+        log.default("DiaWatch continuation prompt detected — sending \\x03\\x03 + \\r")
+        sentCtrlC = true
+        bleResponse = ""
+        p.writeValue(Data([0x03, 0x03, 0x0D]), for: rx, type: .withResponse)
+        cancelPromptTimer()
+        startPromptTimer()
+    }
+
+    private func startPromptTimer() {
         promptTimer = Timer.scheduledTimer(withTimeInterval: Self.promptTimeout, repeats: false) { [weak self] _ in
             guard let self else { return }
             self.promptTimer = nil
@@ -832,22 +817,11 @@ extension DiaWatchManager: CBCentralManagerDelegate {
             log.default("Sending DiaWatch queued command")
             beginTransmission(next.message, onComplete: next.onComplete)
         } else {
-            if !echoDetected && !isRetryAttempt && purgeEnabled {
-                // First attempt got no echo and purge is enabled — retry with \x03\x03.
-                let retryMsg = currentTransmissionMessage
-                let retryCompletion = onTransmissionComplete
-                onTransmissionComplete = nil
-                transmissionQueue = []  // queue is re-filled during purge wait
-                enterPurge(message: retryMsg, onComplete: retryCompletion)
-            } else {
-                isRetryAttempt = false
-                if !echoDetected { lastPushError = "No echo from watch" }
-
-                onTransmissionComplete?()
-                onTransmissionComplete = nil
-                hasTransmitted = true
-                pushPhase = .idle
-            }
+            if !echoDetected { lastPushError = "No echo from watch" }
+            onTransmissionComplete?()
+            onTransmissionComplete = nil
+            hasTransmitted = true
+            pushPhase = .idle
         }
     }
 }
@@ -925,15 +899,22 @@ extension DiaWatchManager: CBPeripheralDelegate {
               let data = characteristic.value,
               let text = String(data: data, encoding: .utf8) else { return }
 
-        // While probing for REPL readiness, look for >>> before writing any payload.
+        // While probing for REPL readiness, dispatch on the LAST prompt seen:
+        //   >>>  → ready, start writing
+        //   ...  → REPL is in continuation; send Ctrl-C twice and wait for >>>
         if waitingForPrompt {
             bleResponse += text
-            if bleResponse.contains(">>>") {
+            switch lastPromptIn(bleResponse) {
+            case .ready:
                 waitingForPrompt = false
                 cancelPromptTimer()
                 bleResponse = ""
                 log.default("DiaWatch REPL prompt detected — starting write")
                 writeNextChunk()
+            case .continuation:
+                if !sentCtrlC { sendCtrlCBreak() }
+            case .none:
+                break
             }
             return
         }

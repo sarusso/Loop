@@ -393,9 +393,6 @@ struct DiaWatchSettingsView: View {
             case .sending:
                 ProgressView().scaleEffect(0.75)
                 Text("Sending…").foregroundColor(.secondary)
-            case .purging:
-                ProgressView().scaleEffect(0.75)
-                Text("Purging…").foregroundColor(.secondary)
             case .awaitingResponse:
                 ProgressView().scaleEffect(0.75)
                 Text("Awaiting response…").foregroundColor(.secondary)
@@ -934,8 +931,6 @@ struct DiaWatchSettingsView: View {
                 activeButton = .ctrlC
                 manager.sendCustomCommand("\u{03}")
             }
-
-            Toggle("Enable purge (Ctrl-C retry)", isOn: $manager.purgeEnabled)
 
             VStack(alignment: .leading, spacing: 6) {
                 TextField("Custom command", text: $customCommandText)
