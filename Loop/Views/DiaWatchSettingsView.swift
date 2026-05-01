@@ -909,7 +909,7 @@ struct DiaWatchSettingsView: View {
                 status: batteryStatus
             ) {
                 activeButton = .battery
-                manager.sendCustomCommand("watch.battery.level()")
+                manager.sendCustomCommand("import utils; utils.get_battery_level()")
             }
 
             actionRow(
@@ -919,7 +919,7 @@ struct DiaWatchSettingsView: View {
                 status: uptimeStatus
             ) {
                 activeButton = .uptime
-                manager.sendCustomCommand("wasp.uptime()/3600")
+                manager.sendCustomCommand("import utils; utils.get_uptime()")
             }
 
             actionRow(
@@ -929,7 +929,7 @@ struct DiaWatchSettingsView: View {
                 status: memFreeStatus
             ) {
                 activeButton = .memFree
-                manager.sendCustomCommand("get_mem_free()")
+                manager.sendCustomCommand("import utils; utils.get_mem_free()")
             }
 
             actionRow(
@@ -939,7 +939,7 @@ struct DiaWatchSettingsView: View {
                 status: memLayoutStatus
             ) {
                 activeButton = .memLayout
-                manager.sendCustomCommand("get_mem_layout()")
+                manager.sendCustomCommand("import utils; utils.get_mem_layout()")
             }
 
             // NOTE: Do NOT remove these commented-out log buttons. Keep them here
