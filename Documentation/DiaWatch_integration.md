@@ -4,15 +4,43 @@ Pushes CGM glucose readings from Loop to a PineTime watch running [DiaWatch](htt
 
 ## How it works
 
-Every time the G7 (or any connected CGM) delivers a new reading, Loop pushes it to the paired watch:
+Every time Loop's glucose store updates, Loop drains **every unsent sample** since the last successful push to the paired watch, in chronological order:
 
 ```
 GB({"app":"dw","t":"r","v":156,"tr":"u","ts":1712345678})\r\n
 ```
 
-The message is split into 20-byte chunks and written to the NUS RX characteristic using write-with-response (ATT acknowledged writes). After all chunks are sent, Loop waits for the watch to echo the command and return a `>>>` prompt, then disconnects.
+Each message is split into 20-byte chunks and written to the NUS RX characteristic using write-with-response (ATT acknowledged writes). After all chunks are sent, Loop waits for the watch to echo the command, return `reading received`, and re-emit a `>>>` prompt, then disconnects. Only after the watch confirms receipt is the per-sample watermark advanced and persisted.
 
-This works in the background — no need to keep the app open.
+This works in the background — no need to keep the app open. See [Reading delivery](#reading-delivery) for the full guarantees.
+
+## Reading delivery
+
+Reading transmission uses a **watermark-and-drain** model:
+
+- The persisted `lastSentTs` (UserDefaults `com.loopkit.Loop.DiaWatch.lastSentTs`) holds the Unix-seconds timestamp of the most recent reading the watch *confirmed* it received (i.e. responded with `reading received` and a clean `>>>`).
+- Whenever LoopKit posts `LoopDataUpdated` with `.glucose` context, `DiaWatchManager.drainReadings()` queries `glucoseStore` for every sample with `startDate > max(lastSentTs, now − maxBackfillInterval)`, sorted ascending, and sends them one at a time over BLE.
+- `lastSentTs` advances **only on confirmed success**. On any send failure, the drain stops; the next `LoopDataUpdated.glucose` notification re-queries from the un-advanced watermark and naturally retries.
+- A re-entry guard (`isDrainingReadings`) prevents concurrent drains when notifications fire while one is already in progress.
+- `DiaWatchManager.maxBackfillInterval` (default `2 * 60 * 60` = 2 hours) caps how far back the watermark can effectively reach — after long offline periods (sleep, app crash, prolonged BLE outage) the older samples beyond the cap are silently skipped to avoid flooding the watch with stale data.
+
+### Why this design
+
+The notification we hook into (`LoopDataUpdated.glucose`) is fired by LoopKit whenever `GlucoseStore.glucoseSamplesDidChange` fires — and that is fired by **six** code paths in `GlucoseStore`, not just "new CGM reading arrived" (also: HealthKit syncs, cache purges, manual entries, sample replacements, etc.). The previous "send `latestGlucose` on every notification" model produced duplicate timestamps (notification fires without `latestGlucose` changing) and silently dropped backfilled intermediate samples (only the newest of a batch was ever sent). The watermark+drain model uses the per-sample identity in the store as the source of truth instead of trusting the notification cadence.
+
+### Behaviour matrix
+
+| Scenario | Outcome |
+|---|---|
+| Fresh install, CGM running | First push arrives ~5 min after install; up to 2 h of cached samples are sent in chronological order. |
+| Spurious `glucoseSamplesDidChange` (no new sample) | Query returns empty; no-op. No duplicate sent. |
+| Backfill of 30 min (6 samples) after gap | All 6 sent in order; ~30–60 s of BLE traffic. |
+| Backfill of 5 h (60 samples) after long offline | Only the last 2 h (24 samples) are sent; older 36 are permanent holes (intentional cap). |
+| Send #3 of 6 fails | Drain stops; `lastSentTs` reflects sample #2's ts. Next CGM reading (~5 min later) re-queries, finds #3 still pending plus the new one, sends both. |
+| App crash mid-drain | On relaunch, persisted `lastSentTs` reflects the last *confirmed* send. Next CGM reading drains the rest. |
+| Concurrent notification while draining | Re-entry guard skips it. The currently-running drain picks up newer samples on its next iteration. |
+| Out-of-order: `glucoseStore.latestGlucose` momentarily resolves to an older sample | Query still returns nothing greater than `lastSentTs`. No backwards send. |
+| Test push (debug "Push test" button) | Bypasses drain and watermark; sends a synthetic reading at `Date()`. Watch silently dedups if `ts` is older than its own last received. Does **not** advance `lastSentTs`. |
 
 ## Pairing
 
@@ -69,9 +97,8 @@ Pattern picker + **Play** button — sends a MicroPython command to play the sel
 | Element | What it does |
 |---|---|
 | Test value stepper + **Send test reading** | Pushes a reading with the chosen mg/dL value and flat trend |
-| **Get battery / Get free mem / Get uptime** | Sends MicroPython one-liners to query watch state |
+| **Get battery / Get free mem / Get free mem blocks / Get uptime** | Sends MicroPython one-liners to query watch state |
 | **Send Ctrl-C** | Sends `\x03` to interrupt any running command on the watch |
-| **Enable purge (Ctrl-C retry)** | Toggle (default OFF) — when ON, a failed first attempt triggers a 30-second purge + retry with `\x03\x03` preamble |
 | Custom command + **Send** | Free-form MicroPython command entry |
 | **Start / Stop log stream** | Opens a listen-only BLE connection — no probe, no payload, just streams everything the watch sends into the response area |
 | Last transmission response | Scrollable text area showing raw NUS TX data from the most recent session, with timestamp (e.g., "@ 14:23 16/4/2026") |
@@ -281,13 +308,15 @@ NUS RX uses write-with-response (ATT acknowledged writes). Each chunk's link-lay
 
 A 15-second watchdog timer starts when each push begins. If anything stalls — connection attempt, service discovery, TX subscription, prompt probe, or writing — the timer fires, cancels the peripheral connection, and resets all state so the next glucose reading can attempt a fresh push.
 
-### MemoryError retry
+### REPL prompt probe
 
-If the watch responds with a `MemoryError`, the same command is retried up to 3 times at 10-second intervals (no `\x03\x03` preamble). Status shows "MemoryError, retrying (N/3)..." during the wait. After 3 failures the error is reported normally.
+After connecting and subscribing to TX notifications, Loop sends a bare `\r` and waits up to 5 s for a prompt. The **last** prompt token received decides what happens next:
 
-### Purge cycle
+- `>>>` → REPL is at the top level, proceed to write the payload chunks
+- `...` → REPL is in a multi-line continuation (stuck mid-input). Loop sends `\x03\x03\r` (Ctrl-C twice + CR) once to break out, then waits a fresh 5 s for `>>>`
+- neither within 5 s → abort with "REPL not ready"
 
-When enabled via the Debug toggle "Enable purge (Ctrl-C retry)" (default OFF), a failed first attempt (no echo detected) triggers a 30-second wait followed by a retry with `\x03\x03` preamble to clear a potentially stuck REPL. Status shows "Purging..." during the wait.
+This eliminates the need for a separate purge/retry cycle: the recovery happens inline during the probe instead of after a failed transmission.
 
 ### Log stream
 
@@ -306,6 +335,7 @@ The Debug section offers a listen-only BLE connection mode. Start log stream con
 | `com.loopkit.Loop.DiaWatch.deviceName` | Paired device name |
 | `com.loopkit.Loop.DiaWatch.presets` | JSON-encoded preset array |
 | `com.loopkit.Loop.DiaWatch.transmissionsEnabled` | Push readings toggle state |
+| `com.loopkit.Loop.DiaWatch.lastSentTs` | Watermark — Unix seconds of the most recent reading the watch confirmed receiving |
 
 Presets are persisted to UserDefaults only after the BLE transmission succeeds. On failure, the dirty flag stays true and Discard reverts to the last-known-good config.
 
@@ -330,8 +360,6 @@ The DiaWatch settings screen shows a permanent "Status" row that reflects the cu
 | `.connecting` | Connecting... | yes |
 | `.sending` | Sending... | yes |
 | `.awaitingResponse` | Awaiting response... | yes |
-| `.purging` | Purging... | yes |
-| `.retrying(attempt, of)` | MemoryError, retrying (N/3)... | yes |
 | `.streaming` | Streaming... | yes |
 
 ### Scenario a) Correct transmission
@@ -354,26 +382,11 @@ The DiaWatch settings screen shows a permanent "Status" row that reflects the cu
 
 ### Scenario c) Connection OK, no response (watch is unresponsive)
 
-With purge **disabled** (default):
-
 | Status | Duration | Last response |
 |---|---|---|
 | Connecting... | ~1-3s | (unchanged, stale) |
 | Sending... | ~0.5s | (unchanged, stale) |
 | Awaiting response... | 20s | no update |
-| No echo from watch, idle | final (orange) | stale timestamp |
-
-With purge **enabled**:
-
-| Status | Duration | Last response |
-|---|---|---|
-| Connecting... | ~1-3s | (unchanged, stale) |
-| Sending... | ~0.5s | (unchanged, stale) |
-| Awaiting response... | 20s | no update |
-| Purging... | 30s | (unchanged) |
-| Connecting... | ~1-3s | (unchanged) |
-| Sending... | ~0.5s | (unchanged) |
-| Awaiting response... | 20s | still silent |
 | No echo from watch, idle | final (orange) | stale timestamp |
 
 ### Scenario d) Cannot connect (watch off or out of range)
@@ -415,8 +428,8 @@ Glucose readings additionally verify that "reading received" appears in the resp
 | 1 | Watch echoes command but crashes before processing (no `>>>`) | Yes | `evaluateResult` detects `echoDetected && replPromptCount == 0` → "Watch did not complete execution, idle" |
 | 2 | Watch sends partial response then disconnects | Partially | If disconnect happens mid-send → "Disconnected mid-send, idle". If after chunks written but before `>>>` → caught by scenario 1. If `>>>` arrived but response is incomplete → currently marked OK |
 | 3 | Watch responds with a Python traceback | Yes | `evaluateResult` uses case-insensitive check for "error" — Python tracebacks end with `...Error:` (e.g., `TypeError:`, `ValueError:`, `KeyError:`) so they are caught |
-| 4 | Watch responds with MemoryError | Yes | Retries up to 3 times at 10-second intervals. Shows "MemoryError, retrying (1/3)...". After 3 failures → per-command reject message + ", idle" |
-| 5 | No response at all within 20s | Yes | Response timer fires → disconnect → purge + retry (if enabled) → "No echo from watch, idle" |
+| 4 | Watch responds with MemoryError | Reported | "error" substring in response → per-command reject message + ", idle". Reading is left for the next push to retry (watermark not advanced) |
+| 5 | No response at all within 20s | Yes | Response timer fires → disconnect → "No echo from watch, idle" |
 | 6 | Cannot connect at all | Yes | 15s send timeout → "Send timed out, idle". Or immediate `didFailToConnect` → "Connection failed, idle" |
 | 7 | REPL not ready (booting) | Yes | Prompt probe times out (5s) → "REPL not ready, idle". No payload sent |
 | 8 | Correct transmission, watch confirms | Yes | "OK, idle" (green) |

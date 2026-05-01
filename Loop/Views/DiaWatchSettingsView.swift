@@ -22,7 +22,7 @@ struct DiaWatchSettingsView: View {
     @State private var alertsDirty = false
     @State private var rangesDirty = false
 
-    private enum ActiveButton { case none, test, saveGeneral, saveAlerts, saveRanges, activatePreset, deletePreset, testHaptic, customCommand, getLog, getPrevLog, setTime, battery, freeMem, freeMemBlocks, uptime, ctrlC }
+    private enum ActiveButton { case none, test, saveGeneral, saveAlerts, saveRanges, activatePreset, deletePreset, testHaptic, customCommand, getLog, getPrevLog, setTime, battery, memFree, memLayout, uptime, ctrlC, resetWatermark, drainReadings }
     @State private var activeButton: ActiveButton = .none
 
     @FocusState private var presetNameFocused: Bool
@@ -52,10 +52,12 @@ struct DiaWatchSettingsView: View {
     @State private var customCommandText: String = ""
     @State private var setTimeStatus: ButtonStatus? = nil
     @State private var batteryStatus: ButtonStatus? = nil
-    @State private var freeMemStatus: ButtonStatus? = nil
-    @State private var freeMemBlocksStatus: ButtonStatus? = nil
+    @State private var memFreeStatus: ButtonStatus? = nil
+    @State private var memLayoutStatus: ButtonStatus? = nil
     @State private var uptimeStatus: ButtonStatus? = nil
     @State private var ctrlCStatus: ButtonStatus? = nil
+    @State private var resetWatermarkStatus: ButtonStatus? = nil
+    @State private var drainReadingsStatus: ButtonStatus? = nil
     @State private var getLogStatus: ButtonStatus? = nil
     @State private var getPrevLogStatus: ButtonStatus? = nil
 
@@ -229,10 +231,12 @@ struct DiaWatchSettingsView: View {
             case .getPrevLog:    text = isError ? (manager.lastPushError ?? "Failed") : "Done!"
             case .setTime:       text = isError ? (manager.lastPushError ?? "Failed") : "Set!"
             case .battery:       text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
-            case .freeMem:       text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
-            case .freeMemBlocks: text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
+            case .memFree:       text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
+            case .memLayout:     text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
             case .uptime:        text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
             case .ctrlC:         text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
+            case .resetWatermark: text = "Reset!"
+            case .drainReadings: text = isError ? (manager.lastPushError ?? "Failed") : "Triggered!"
             case .none:          return
             }
 
@@ -271,18 +275,24 @@ struct DiaWatchSettingsView: View {
             case .battery:
                 batteryStatus = status
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { batteryStatus = nil }
-            case .freeMem:
-                freeMemStatus = status
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { freeMemStatus = nil }
-            case .freeMemBlocks:
-                freeMemBlocksStatus = status
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { freeMemBlocksStatus = nil }
+            case .memFree:
+                memFreeStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { memFreeStatus = nil }
+            case .memLayout:
+                memLayoutStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { memLayoutStatus = nil }
             case .uptime:
                 uptimeStatus = status
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { uptimeStatus = nil }
             case .ctrlC:
                 ctrlCStatus = status
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { ctrlCStatus = nil }
+            case .resetWatermark:
+                resetWatermarkStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { resetWatermarkStatus = nil }
+            case .drainReadings:
+                drainReadingsStatus = status
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { drainReadingsStatus = nil }
             case .getLog:
                 getLogStatus = status
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { getLogStatus = nil }
@@ -378,8 +388,15 @@ struct DiaWatchSettingsView: View {
                 Text("No readings pushed yet").foregroundColor(.secondary)
             }
 
+            HStack {
+                Text("Pending readings")
+                Spacer()
+                Text("\(manager.pendingReadingsCount)").foregroundColor(.secondary)
+            }
+
             pushStatusRow
         }
+        .onAppear { manager.refreshPendingReadingsCount() }
     }
 
     private var pushStatusRow: some View {
@@ -860,6 +877,29 @@ struct DiaWatchSettingsView: View {
             }
 
             actionRow(
+                label: "Drain pending readings",
+                id: .drainReadings,
+                dirty: false,
+                status: drainReadingsStatus
+            ) {
+                activeButton = .drainReadings
+                drainReadingsStatus = ButtonStatus(text: "Triggered!", isError: false)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { drainReadingsStatus = nil }
+                manager.drainReadings()
+            }
+
+            actionRow(
+                label: "Reset readings watermark",
+                id: .resetWatermark,
+                dirty: false,
+                status: resetWatermarkStatus
+            ) {
+                manager.resetReadingsWatermark()
+                resetWatermarkStatus = ButtonStatus(text: "Reset!", isError: false)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { resetWatermarkStatus = nil }
+            }
+
+            actionRow(
                 label: "Get battery",
                 id: .battery,
                 dirty: false,
@@ -870,26 +910,6 @@ struct DiaWatchSettingsView: View {
             }
 
             actionRow(
-                label: "Get free mem",
-                id: .freeMem,
-                dirty: false,
-                status: freeMemStatus
-            ) {
-                activeButton = .freeMem
-                manager.sendCustomCommand("wasp.get_mem_free()")
-            }
-
-            actionRow(
-                label: "Get free mem blocks",
-                id: .freeMemBlocks,
-                dirty: false,
-                status: freeMemBlocksStatus
-            ) {
-                activeButton = .freeMemBlocks
-                manager.sendCustomCommand("wasp.get_mem_free_blocks()")
-            }
-
-            actionRow(
                 label: "Get uptime",
                 id: .uptime,
                 dirty: false,
@@ -897,6 +917,26 @@ struct DiaWatchSettingsView: View {
             ) {
                 activeButton = .uptime
                 manager.sendCustomCommand("wasp.uptime()/3600")
+            }
+
+            actionRow(
+                label: "Get mem free",
+                id: .memFree,
+                dirty: false,
+                status: memFreeStatus
+            ) {
+                activeButton = .memFree
+                manager.sendCustomCommand("get_mem_free()")
+            }
+
+            actionRow(
+                label: "Get mem layout",
+                id: .memLayout,
+                dirty: false,
+                status: memLayoutStatus
+            ) {
+                activeButton = .memLayout
+                manager.sendCustomCommand("get_mem_layout()")
             }
 
             // NOTE: Do NOT remove these commented-out log buttons. Keep them here

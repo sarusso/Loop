@@ -184,6 +184,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
     @Published var isStreaming: Bool = false
     @Published var presets: [Preset] = UserDefaults.standard.diaWatchPresets
     @Published var bleResponse: String = ""
+    @Published var pendingReadingsCount: Int = 0
     @Published var transmissionsEnabled: Bool = UserDefaults.standard.diaWatchTransmissionsEnabled {
         didSet {
             UserDefaults.standard.diaWatchTransmissionsEnabled = transmissionsEnabled
@@ -217,6 +218,12 @@ final class DiaWatchManager: NSObject, ObservableObject {
     private var pendingCommandEcho: String?   // command text the REPL will echo back (no \r\n)
     private var echoDetected = false          // true once pendingCommandEcho seen in TX stream
 
+    // Reading-drain state. Backfill cap of 2h prevents flooding the watch
+    // after long offline periods. lastSentTs is persisted so the watermark
+    // survives app restarts.
+    static let maxBackfillInterval: TimeInterval = 2 * 60 * 60
+    private var isDrainingReadings = false
+
     private weak var deviceManager: DeviceDataManager?
     private let log = DiagnosticLog(category: "DiaWatchManager")
 
@@ -247,7 +254,31 @@ final class DiaWatchManager: NSObject, ObservableObject {
             let context = LoopDataManager.LoopUpdateContext(rawValue: raw),
             case .glucose = context
         else { return }
+        refreshPendingReadingsCount()
         push()
+    }
+
+    /// Recomputes the number of glucose samples in the 2h window with
+    /// startDate strictly newer than the watermark. Async; updates
+    /// `pendingReadingsCount` on the main queue.
+    func refreshPendingReadingsCount() {
+        guard let dm = deviceManager else { return }
+        let now = Date()
+        let cap = Int(now.addingTimeInterval(-Self.maxBackfillInterval).timeIntervalSince1970)
+        let lastSent = UserDefaults.standard.diaWatchLastSentTs
+        let floor = max(lastSent, cap)
+        let floorDate = Date(timeIntervalSince1970: TimeInterval(floor))
+        dm.glucoseStore.getGlucoseSamples(start: floorDate, end: nil) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if case .success(let samples) = result {
+                    let lastSentNow = UserDefaults.standard.diaWatchLastSentTs
+                    self.pendingReadingsCount = samples.filter {
+                        Int($0.startDate.timeIntervalSince1970) > lastSentNow
+                    }.count
+                }
+            }
+        }
     }
 
     // MARK: - Transmission result evaluation
@@ -268,22 +299,97 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
     func push() {
         guard transmissionsEnabled, UserDefaults.standard.diaWatchPeripheralID != nil else { return }
-        guard let dm = deviceManager, let sample = dm.glucoseStore.latestGlucose else { return }
-
-        let mgdl = Int(sample.quantity.doubleValue(for: .milligramsPerDeciliter))
-        let trend = diaWatchTrend(from: dm.glucoseDisplay(for: sample)?.trendType)
-        let ts = Int(sample.startDate.timeIntervalSince1970)
-        sendReading(mgdl: mgdl, trend: trend, ts: ts)
+        drainReadings()
     }
 
     func pushTest(mgdl: Int = 190) {
-        sendReading(mgdl: mgdl, trend: "f", ts: Int(Date().timeIntervalSince1970))
+        // Debug helper: bypasses the drain and watermark, sends a synthetic
+        // reading at the current time. Watch will silently dedup if older
+        // than its own last received ts.
+        sendOneOffReading(mgdl: mgdl, trend: "f", ts: Int(Date().timeIntervalSince1970))
     }
 
-    private func sendReading(mgdl: Int, trend: String, ts: Int) {
+    func resetReadingsWatermark() {
+        UserDefaults.standard.diaWatchLastSentTs = 0
+        log.default("DiaWatch readings watermark reset to 0")
+        refreshPendingReadingsCount()
+    }
+
+    func drainReadings() {
+        guard !isDrainingReadings else { return }
+        guard let dm = deviceManager else { return }
+
+        let now = Date()
+        let cap = Int(now.addingTimeInterval(-Self.maxBackfillInterval).timeIntervalSince1970)
+        let lastSent = UserDefaults.standard.diaWatchLastSentTs
+        let floor = max(lastSent, cap)
+        let floorDate = Date(timeIntervalSince1970: TimeInterval(floor))
+
+        isDrainingReadings = true
+        dm.glucoseStore.getGlucoseSamples(start: floorDate, end: nil) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .failure(let error):
+                    self.log.error("DiaWatch drain query failed: %{public}@", String(describing: error))
+                    self.isDrainingReadings = false
+                case .success(let samples):
+                    let unsent = samples.filter { Int($0.startDate.timeIntervalSince1970) > UserDefaults.standard.diaWatchLastSentTs }
+                    self.pendingReadingsCount = unsent.count
+                    if unsent.isEmpty {
+                        self.isDrainingReadings = false
+                        return
+                    }
+                    self.log.default("DiaWatch draining %{public}d unsent reading(s)", unsent.count)
+                    self.sendNextInDrain(unsent[...])
+                }
+            }
+        }
+    }
+
+    private func sendNextInDrain(_ remaining: ArraySlice<StoredGlucoseSample>) {
+        guard let sample = remaining.first else {
+            isDrainingReadings = false
+            // Re-check: a new sample may have arrived during this drain;
+            // its notification was no-op'd by the re-entry guard. The
+            // re-query returns empty if nothing new, clearing the flag.
+            drainReadings()
+            return
+        }
+        let mgdl = Int(sample.quantity.doubleValue(for: .milligramsPerDeciliter))
+        let trend = diaWatchTrend(from: deviceManager?.glucoseDisplay(for: sample)?.trendType)
+        let ts = Int(sample.startDate.timeIntervalSince1970)
+        let message = "GB({\"app\":\"dw\",\"t\":\"r\",\"v\":\(mgdl),\"tr\":\"\(trend)\",\"ts\":\(ts)})\r\n"
+        log.default("Sending DiaWatch reading: %{public}@", message)
+        beginTransmission(message) { [weak self] in
+            guard let self else { return }
+            self.evaluateResult(rejectMessage: "Unexpected watch response")
+            let confirmed = self.lastPushError == nil && self.bleResponse.contains("reading received")
+            if self.lastPushError == nil && !confirmed {
+                self.lastPushError = "Unexpected watch response"
+            }
+            if confirmed {
+                UserDefaults.standard.diaWatchLastSentTs = ts
+                self.lastSentMgdl = mgdl
+                self.lastPushDate = Date()
+                self.lastPushValue = mgdl
+                self.pendingReadingsCount = max(0, self.pendingReadingsCount - 1)
+                self.log.default("DiaWatch push complete (ts=%{public}d)", ts)
+                self.sendNextInDrain(remaining.dropFirst())
+            } else {
+                // Stop the drain. Next LoopDataUpdated.glucose notification
+                // will re-query from the un-advanced watermark and retry
+                // this sample plus anything newer.
+                self.isDrainingReadings = false
+                self.log.default("DiaWatch reading send failed; drain paused, will retry on next notification")
+            }
+        }
+    }
+
+    private func sendOneOffReading(mgdl: Int, trend: String, ts: Int) {
         let message = "GB({\"app\":\"dw\",\"t\":\"r\",\"v\":\(mgdl),\"tr\":\"\(trend)\",\"ts\":\(ts)})\r\n"
         lastSentMgdl = mgdl
-        log.default("Sending DiaWatch reading: %{public}@", message)
+        log.default("Sending DiaWatch reading (test): %{public}@", message)
         beginTransmission(message) { [weak self] in
             guard let self else { return }
             self.lastPushDate = Date()
@@ -292,7 +398,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
             if self.lastPushError == nil && !self.bleResponse.contains("reading received") {
                 self.lastPushError = "Unexpected watch response"
             }
-            self.log.default("DiaWatch push complete")
+            self.log.default("DiaWatch test push complete")
         }
     }
 
@@ -563,6 +669,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         sentCtrlC = false
         isStreaming = false
         isSending = false
+        isDrainingReadings = false
         pendingChunks = []
         if let p = peripheral { central.cancelPeripheralConnection(p) }
         peripheral = nil
@@ -809,6 +916,7 @@ extension DiaWatchManager: CBCentralManagerDelegate {
             let msg = error?.localizedDescription ?? "Disconnected mid-send"
             log.error("DiaWatch disconnected mid-send: %{public}@", msg)
             onTransmissionComplete = nil
+            isDrainingReadings = false
             lastPushError = msg
             hasTransmitted = true
             pushPhase = .idle
@@ -818,10 +926,17 @@ extension DiaWatchManager: CBCentralManagerDelegate {
             beginTransmission(next.message, onComplete: next.onComplete)
         } else {
             if !echoDetected { lastPushError = "No echo from watch" }
-            onTransmissionComplete?()
+            // Capture-and-clear BEFORE firing: the completion may re-enter
+            // beginTransmission (e.g. drain advancing to the next reading),
+            // which sets a fresh onTransmissionComplete and pushPhase. If we
+            // cleared them after firing, we'd clobber the new closure and
+            // wedge the drain — silently, since the new completion never
+            // gets called and isDrainingReadings stays true.
+            let completion = onTransmissionComplete
             onTransmissionComplete = nil
             hasTransmitted = true
             pushPhase = .idle
+            completion?()
         }
     }
 }
