@@ -1,13 +1,13 @@
-# DiaWatch BLE Integration
+# GlyWatch BLE Integration
 
-Pushes CGM glucose readings from Loop to a PineTime watch running [DiaWatch](https://github.com/sarusso/DiaWatch) firmware over Bluetooth Low Energy, using the Nordic UART Service (NUS) protocol.
+Pushes CGM glucose readings from Loop to a PineTime watch running [GlyWatch](https://github.com/sarusso/GlyWatch) firmware over Bluetooth Low Energy, using the Nordic UART Service (NUS) protocol.
 
 ## How it works
 
 Every time Loop's glucose store updates, Loop drains **every unsent sample** since the last successful push to the paired watch, in chronological order:
 
 ```
-GB({"app":"dw","t":"r","v":156,"tr":"u","ts":1712345678})\r\n
+GB({"app":"gly","t":"r","v":156,"tr":"u","ts":1712345678})\r\n
 ```
 
 Each message is split into 20-byte chunks and written to the NUS RX characteristic using write-with-response (ATT acknowledged writes). After all chunks are sent, Loop waits for the watch to echo the command, return `reading received`, and re-emit a `>>>` prompt, then disconnects. Only after the watch confirms receipt is the per-sample watermark advanced and persisted.
@@ -18,11 +18,11 @@ This works in the background — no need to keep the app open. See [Reading deli
 
 Reading transmission uses a **watermark-and-drain** model:
 
-- The persisted `lastSentTs` (UserDefaults `com.loopkit.Loop.DiaWatch.lastSentTs`) holds the Unix-seconds timestamp of the most recent reading the watch *confirmed* it received (i.e. responded with `reading received` and a clean `>>>`).
-- Whenever LoopKit posts `LoopDataUpdated` with `.glucose` context, `DiaWatchManager.drainReadings()` queries `glucoseStore` for every sample with `startDate > max(lastSentTs, now − maxBackfillInterval)`, sorted ascending, and sends them one at a time over BLE.
+- The persisted `lastSentTs` (UserDefaults `com.loopkit.Loop.GlyWatch.lastSentTs`) holds the Unix-seconds timestamp of the most recent reading the watch *confirmed* it received (i.e. responded with `reading received` and a clean `>>>`).
+- Whenever LoopKit posts `LoopDataUpdated` with `.glucose` context, `GlyWatchManager.drainReadings()` queries `glucoseStore` for every sample with `startDate > max(lastSentTs, now − maxBackfillInterval)`, sorted ascending, and sends them one at a time over BLE.
 - `lastSentTs` advances **only on confirmed success**. On any send failure, the drain stops; the next `LoopDataUpdated.glucose` notification re-queries from the un-advanced watermark and naturally retries.
 - A re-entry guard (`isDrainingReadings`) prevents concurrent drains when notifications fire while one is already in progress.
-- `DiaWatchManager.maxBackfillInterval` (default `2 * 60 * 60` = 2 hours) caps how far back the watermark can effectively reach — after long offline periods (sleep, app crash, prolonged BLE outage) the older samples beyond the cap are silently skipped to avoid flooding the watch with stale data.
+- `GlyWatchManager.maxBackfillInterval` (default `2 * 60 * 60` = 2 hours) caps how far back the watermark can effectively reach — after long offline periods (sleep, app crash, prolonged BLE outage) the older samples beyond the cap are silently skipped to avoid flooding the watch with stale data.
 
 ### Why this design
 
@@ -44,7 +44,7 @@ The notification we hook into (`LoopDataUpdated.glucose`) is fired by LoopKit wh
 
 ## Pairing
 
-1. Open Loop → **Settings** → scroll to the **DiaWatch** row
+1. Open Loop → **Settings** → scroll to the **GlyWatch** row
 2. Tap it, then tap **Scan for device**
 3. Make sure the watch is nearby and not connected to anything else
 4. All nearby BLE devices appear in the list with their name and signal strength — pick your PineTime
@@ -56,7 +56,7 @@ After pairing, Loop reconnects automatically on every new glucose reading. No ne
 
 ## Settings screen
 
-The DiaWatch settings screen is divided into four sections:
+The GlyWatch settings screen is divided into four sections:
 
 ### Status section
 
@@ -105,12 +105,12 @@ Pattern picker + **Play** button — sends a MicroPython command to play the sel
 
 ## Wire protocol
 
-All messages use the `GB({...})\r\n` envelope. The `app` key is always `"dw"`.
+All messages use the `GB({...})\r\n` envelope. The `app` key is always `"gly"`.
 
 ### Reading push (`t: "r"`)
 
 ```json
-{"app":"dw","t":"r","v":156,"tr":"u","ts":1712345678}
+{"app":"gly","t":"r","v":156,"tr":"u","ts":1712345678}
 ```
 
 | Key | Type | Meaning |
@@ -122,7 +122,7 @@ All messages use the `GB({...})\r\n` envelope. The `app` key is always `"dw"`.
 ### Save general config (`t: "s_c"`)
 
 ```json
-{"app":"dw","t":"s_c","p":0,"n":"default","rw":0,"db":2,"ds":10,"fc":"Trend","od":10,"nd":30,"st":0,"dt":1,"lt":0,"sp":1,"lp":2}
+{"app":"gly","t":"s_c","p":0,"n":"default","rw":0,"db":2,"ds":10,"fc":"Trend","od":10,"nd":30,"st":0,"dt":1,"lt":0,"sp":1,"lp":2}
 ```
 
 | Key | Type | Meaning |
@@ -144,7 +144,7 @@ All messages use the `GB({...})\r\n` envelope. The `app` key is always `"dw"`.
 ### Save ranges (`t: "s_r"`)
 
 ```json
-{"app":"dw","t":"s_r","p":0,"rc":[70,100,200,300],"rh":["single_buzz","notification","notification_single","stutter","stutter_long"],"ph":[1,1,0,0,0]}
+{"app":"gly","t":"s_r","p":0,"rc":[70,100,200,300],"rh":["single_buzz","notification","notification_single","stutter","stutter_long"],"ph":[1,1,0,0,0]}
 ```
 
 | Key | Type | Meaning |
@@ -157,8 +157,8 @@ All messages use the `GB({...})\r\n` envelope. The `app` key is always `"dw"`.
 ### Save alert (`t: "s_a"`) / Delete alert (`t: "d_a"`)
 
 ```json
-{"app":"dw","t":"s_a","p":0,"idx":0,"op":"<","thr":90,"pat":"single_buzz"}
-{"app":"dw","t":"d_a","p":0,"idx":0}
+{"app":"gly","t":"s_a","p":0,"idx":0,"op":"<","thr":90,"pat":"single_buzz"}
+{"app":"gly","t":"d_a","p":0,"idx":0}
 ```
 
 | Key | Type | Meaning |
@@ -174,19 +174,19 @@ Enabled alerts send `s_a`; disabled alerts send `d_a`. All 5 slots are sent on e
 ### Activate preset (`t: "a_p"`)
 
 ```json
-{"app":"dw","t":"a_p","p":1}
+{"app":"gly","t":"a_p","p":1}
 ```
 
 ### Delete preset (`t: "d_p"`)
 
 ```json
-{"app":"dw","t":"d_p","p":1}
+{"app":"gly","t":"d_p","p":1}
 ```
 
 ### Set time (`t: "s_t"`)
 
 ```json
-{"app":"dw","t":"s_t","lt":[2026,4,16,14,23,7],"ff":7200}
+{"app":"gly","t":"s_t","lt":[2026,4,16,14,23,7],"ff":7200}
 ```
 
 | Key | Type | Meaning |
@@ -331,24 +331,24 @@ The Debug section offers a listen-only BLE connection mode. Start log stream con
 
 | UserDefaults key | What it stores |
 |---|---|
-| `com.loopkit.Loop.DiaWatch.peripheralID` | Paired peripheral UUID |
-| `com.loopkit.Loop.DiaWatch.deviceName` | Paired device name |
-| `com.loopkit.Loop.DiaWatch.presets` | JSON-encoded preset array |
-| `com.loopkit.Loop.DiaWatch.transmissionsEnabled` | Push readings toggle state |
-| `com.loopkit.Loop.DiaWatch.lastSentTs` | Watermark — Unix seconds of the most recent reading the watch confirmed receiving |
+| `com.loopkit.Loop.GlyWatch.peripheralID` | Paired peripheral UUID |
+| `com.loopkit.Loop.GlyWatch.deviceName` | Paired device name |
+| `com.loopkit.Loop.GlyWatch.presets` | JSON-encoded preset array |
+| `com.loopkit.Loop.GlyWatch.transmissionsEnabled` | Push readings toggle state |
+| `com.loopkit.Loop.GlyWatch.lastSentTs` | Watermark — Unix seconds of the most recent reading the watch confirmed receiving |
 
 Presets are persisted to UserDefaults only after the BLE transmission succeeds. On failure, the dirty flag stays true and Discard reverts to the last-known-good config.
 
 ### Source files
 
-- `Loop/Managers/DiaWatchManager.swift` — all BLE logic, push trigger, pairing, timeout, preset management
-- `Loop/Views/DiaWatchSettingsView.swift` — SwiftUI settings screen
-- `Loop/Views/SettingsView.swift` — DiaWatch status indicator in main Settings list
+- `Loop/Managers/GlyWatchManager.swift` — all BLE logic, push trigger, pairing, timeout, preset management
+- `Loop/Views/GlyWatchSettingsView.swift` — SwiftUI settings screen
+- `Loop/Views/SettingsView.swift` — GlyWatch status indicator in main Settings list
 - `Loop/Extensions/UserDefaults+Loop.swift` — persistence keys
 
 ## Transmission status lifecycle
 
-The DiaWatch settings screen shows a permanent "Status" row that reflects the current state of the BLE pipeline. On fresh app launch with no prior transmissions it shows "Idle" (gray). After a transmission completes, the status always ends with ", idle" prefixed by the outcome.
+The GlyWatch settings screen shows a permanent "Status" row that reflects the current state of the BLE pipeline. On fresh app launch with no prior transmissions it shows "Idle" (gray). After a transmission completes, the status always ends with ", idle" prefixed by the outcome.
 
 ### Phases
 
@@ -454,12 +454,12 @@ The scan shows **all** nearby BLE devices (no name or service filter), so the wa
 This means the BLE writes are completing but the watch firmware is not reacting. Most likely causes:
 
 1. **TX subscription was not sent** — if you are running a very old build of this integration (before the TX subscription fix), the watch will receive the data but ignore it. Update to the latest build.
-2. **DiaWatch app is not active** — the `"app": "dw"` field in the message must be handled by the active watch application. If the watch is running a different app, it will not respond.
+2. **GlyWatch app is not active** — the `"app": "gly"` field in the message must be handled by the active watch application. If the watch is running a different app, it will not respond.
 3. **Watch is connected to another device** — if the watch accepted our connection but is also trying to maintain a connection to another central, behaviour can be unpredictable.
 
 ### "Last push" stopped updating / error shown
 
-- Check that Loop is still receiving CGM readings (main Loop status screen — if glucose is stale there, the problem is upstream of DiaWatch)
+- Check that Loop is still receiving CGM readings (main Loop status screen — if glucose is stale there, the problem is upstream of GlyWatch)
 - Check the error text in the Status row for the specific failure message
 - "REPL not ready" means the watch was booting or unresponsive — wait a few seconds and try again
 - "Send timed out" means the watch accepted the BLE connection but stopped responding mid-sequence

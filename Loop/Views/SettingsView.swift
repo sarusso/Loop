@@ -23,7 +23,7 @@ public struct SettingsView: View {
 
     @ObservedObject var viewModel: SettingsViewModel
     @ObservedObject var versionUpdateViewModel: VersionUpdateViewModel
-    @ObservedObject var diaWatchManager: DiaWatchManager
+    @ObservedObject var glyWatchManager: GlyWatchManager
 
     enum Destination {
         enum Alert: String, Identifiable {
@@ -60,10 +60,10 @@ public struct SettingsView: View {
     
     var localizedAppNameAndVersion: String
 
-    init(viewModel: SettingsViewModel, diaWatchManager: DiaWatchManager, localizedAppNameAndVersion: String) {
+    init(viewModel: SettingsViewModel, glyWatchManager: GlyWatchManager, localizedAppNameAndVersion: String) {
         self.viewModel = viewModel
         self.versionUpdateViewModel = viewModel.versionUpdateViewModel
-        self.diaWatchManager = diaWatchManager
+        self.glyWatchManager = glyWatchManager
         self.localizedAppNameAndVersion = localizedAppNameAndVersion
     }
     
@@ -79,7 +79,7 @@ public struct SettingsView: View {
                         dosingStrategySection
                     }
                     alertManagementSection
-                    diaWatchSection
+                    glyWatchSection
                     if viewModel.pumpManagerSettingsViewModel.isSetUp() {
                         configurationSection
                     }
@@ -370,9 +370,9 @@ extension SettingsView {
         }
     }
     
-    private var diaWatchSection: some View {
+    private var glyWatchSection: some View {
         Section {
-            NavigationLink(destination: DiaWatchSettingsView(manager: diaWatchManager)) {
+            NavigationLink(destination: GlyWatchSettingsView(manager: glyWatchManager)) {
                 LargeButton(
                     action: {},
                     includeArrow: false,
@@ -380,28 +380,28 @@ extension SettingsView {
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(width: 30),
-                    secondaryImageView: diaWatchStatusIndicator,
-                    label: "DiaWatch",
-                    descriptiveText: diaWatchDescriptiveText
+                    secondaryImageView: glyWatchStatusIndicator,
+                    label: "GlyWatch",
+                    descriptiveText: glyWatchDescriptiveText
                 )
                 .padding(.vertical, -2)
             }
         }
     }
 
-    private var diaWatchDescriptiveText: String {
-        guard let name = diaWatchManager.pairedDeviceName else { return "Not paired" }
-        if let date = diaWatchManager.lastPushDate {
-            return "\(name) — \(diaWatchLastPushSummary(date: date))"
+    private var glyWatchDescriptiveText: String {
+        guard let name = glyWatchManager.pairedDeviceName else { return "Not paired" }
+        if let date = glyWatchManager.lastPushDate {
+            return "\(name) — \(glyWatchLastPushSummary(date: date))"
         }
         return name
     }
 
     @ViewBuilder
-    private var diaWatchStatusIndicator: some View {
-        switch diaWatchManager.pushPhase {
+    private var glyWatchStatusIndicator: some View {
+        switch glyWatchManager.pushPhase {
         case .idle:
-            if diaWatchManager.pairedDeviceName != nil {
+            if glyWatchManager.pairedDeviceName != nil {
                 Circle()
                     .fill(lastPushStatusColor)
                     .frame(width: 10, height: 10)
@@ -412,7 +412,7 @@ extension SettingsView {
     }
 
     private var lastPushStatusColor: Color {
-        guard let date = diaWatchManager.lastPushDate else { return .gray }
+        guard let date = glyWatchManager.lastPushDate else { return .gray }
         let age = Date().timeIntervalSince(date)
         if age < 360 { return .green }     // under 6 min — fresh reading
         if age < 900 { return .yellow }    // 6–15 min — slightly stale
@@ -426,7 +426,7 @@ extension SettingsView {
         return f
     }()
 
-    private func diaWatchLastPushSummary(date: Date) -> String {
+    private func glyWatchLastPushSummary(date: Date) -> String {
         "Synced at \(Self.settingsTimeFormatter.string(from: date))"
     }
 
@@ -683,15 +683,15 @@ public struct SettingsView_Previews: PreviewProvider {
     public static var previews: some View {
         let displayGlucosePreference = DisplayGlucosePreference(displayGlucoseUnit: .milligramsPerDeciliter)
         let viewModel = SettingsViewModel.preview
-        let diaWatch = DiaWatchManager.preview
+        let glyWatch = GlyWatchManager.preview
         return Group {
-            SettingsView(viewModel: viewModel, diaWatchManager: diaWatch, localizedAppNameAndVersion: "Loop Demo V1")
+            SettingsView(viewModel: viewModel, glyWatchManager: glyWatch, localizedAppNameAndVersion: "Loop Demo V1")
                 .colorScheme(.light)
                 .previewDevice(PreviewDevice(rawValue: "iPhone SE 2"))
                 .previewDisplayName("SE light")
                 .environmentObject(displayGlucosePreference)
 
-            SettingsView(viewModel: viewModel, diaWatchManager: diaWatch, localizedAppNameAndVersion: "Loop Demo V1")
+            SettingsView(viewModel: viewModel, glyWatchManager: glyWatch, localizedAppNameAndVersion: "Loop Demo V1")
                 .colorScheme(.dark)
                 .previewDevice(PreviewDevice(rawValue: "iPhone 11 Pro Max"))
                 .previewDisplayName("11 Pro dark")

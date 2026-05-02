@@ -1,14 +1,14 @@
 //
-//  DiaWatchSettingsView.swift
+//  GlyWatchSettingsView.swift
 //  Loop
 //
 
 import CoreBluetooth
 import SwiftUI
 
-struct DiaWatchSettingsView: View {
+struct GlyWatchSettingsView: View {
 
-    @ObservedObject var manager: DiaWatchManager
+    @ObservedObject var manager: GlyWatchManager
     @Environment(\.dismiss) private var dismiss
 
     @State private var gearRotation: Double = 0
@@ -47,7 +47,7 @@ struct DiaWatchSettingsView: View {
     @State private var suppressDirty = false
     @State private var testStatus: ButtonStatus? = nil
     @State private var testHapticStatus: ButtonStatus? = nil
-    @State private var selectedHapticPattern: String = DiaWatchManager.HapticAlert.allPatterns[0]
+    @State private var selectedHapticPattern: String = GlyWatchManager.HapticAlert.allPatterns[0]
     @State private var customCommandStatus: ButtonStatus? = nil
     @State private var customCommandText: String = ""
     @State private var setTimeStatus: ButtonStatus? = nil
@@ -85,7 +85,7 @@ struct DiaWatchSettingsView: View {
             testHapticsSection
             debugSection
         }
-        .navigationBarTitle("DiaWatch", displayMode: .inline)
+        .navigationBarTitle("GlyWatch", displayMode: .inline)
         .dismissKeyboardOnScroll()
         .navigationBarBackButtonHidden(anyDirty)
         .toolbar {
@@ -105,7 +105,7 @@ struct DiaWatchSettingsView: View {
         }
         .onChange(of: manager.presets) { _ in
             if suppressDirty { suppressDirty = false; return }
-            let savedPresets = UserDefaults.standard.diaWatchPresets
+            let savedPresets = UserDefaults.standard.glyWatchPresets
             guard selectedPresetIndex < savedPresets.count else {
                 generalDirty = true
                 return
@@ -133,7 +133,7 @@ struct DiaWatchSettingsView: View {
         .alert("Unsaved Changes", isPresented: $showUnsavedChangesAlert) {
             Button("Discard", role: .destructive) {
                 suppressDirty = true
-                let savedPresets = UserDefaults.standard.diaWatchPresets
+                let savedPresets = UserDefaults.standard.glyWatchPresets
                 if selectedPresetIndex < savedPresets.count {
                     manager.presets[selectedPresetIndex] = savedPresets[selectedPresetIndex]
                 } else {
@@ -184,7 +184,7 @@ struct DiaWatchSettingsView: View {
             Button("Discard", role: .destructive) {
                 if let tab = pendingTabSwitch {
                     suppressDirty = true
-                    let savedPresets = UserDefaults.standard.diaWatchPresets
+                    let savedPresets = UserDefaults.standard.glyWatchPresets
                     if selectedPresetIndex < savedPresets.count {
                         manager.presets[selectedPresetIndex] = savedPresets[selectedPresetIndex]
                     }
@@ -498,7 +498,7 @@ struct DiaWatchSettingsView: View {
                     Image(systemName: "doc.on.doc")
                 }
                 .buttonStyle(.borderless)
-                .disabled(manager.presets.count >= DiaWatchManager.maxPresets)
+                .disabled(manager.presets.count >= GlyWatchManager.maxPresets)
                 .padding(.trailing, 12)
 
                 Button {
@@ -515,7 +515,7 @@ struct DiaWatchSettingsView: View {
                     Image(systemName: "plus.circle")
                 }
                 .buttonStyle(.borderless)
-                .disabled(manager.presets.count >= DiaWatchManager.maxPresets)
+                .disabled(manager.presets.count >= GlyWatchManager.maxPresets)
             }
 
             actionRow(
@@ -545,7 +545,7 @@ struct DiaWatchSettingsView: View {
                 get: { configTab },
                 set: { newTab in
                     guard newTab != configTab else { return }
-                    let isNewPreset = selectedPresetIndex >= UserDefaults.standard.diaWatchPresets.count
+                    let isNewPreset = selectedPresetIndex >= UserDefaults.standard.glyWatchPresets.count
                     if isNewPreset {
                         pendingTabSwitch = newTab
                         showNewPresetSaveAlert = true
@@ -652,7 +652,7 @@ struct DiaWatchSettingsView: View {
             get: { manager.presets[selectedPresetIndex].forecaster },
             set: { manager.presets[selectedPresetIndex].forecaster = $0 }
         )) {
-            ForEach(DiaWatchManager.Forecaster.allCases, id: \.self) { f in
+            ForEach(GlyWatchManager.Forecaster.allCases, id: \.self) { f in
                 Text(f.label).tag(f)
             }
         }
@@ -680,12 +680,12 @@ struct DiaWatchSettingsView: View {
     }
 
     @ViewBuilder
-    private func tapActionPicker(label: String, keyPath: WritableKeyPath<DiaWatchManager.Preset, DiaWatchManager.ButtonAndTapAction>) -> some View {
+    private func tapActionPicker(label: String, keyPath: WritableKeyPath<GlyWatchManager.Preset, GlyWatchManager.ButtonAndTapAction>) -> some View {
         Picker(label, selection: Binding(
             get: { manager.presets[selectedPresetIndex][keyPath: keyPath] },
             set: { manager.presets[selectedPresetIndex][keyPath: keyPath] = $0 }
         )) {
-            ForEach(DiaWatchManager.ButtonAndTapAction.allCases, id: \.self) { action in
+            ForEach(GlyWatchManager.ButtonAndTapAction.allCases, id: \.self) { action in
                 Text(action.label).tag(action)
             }
         }
@@ -739,7 +739,7 @@ struct DiaWatchSettingsView: View {
                     get: { manager.presets[selectedPresetIndex].rangeHaptics[rangeIdx] },
                     set: { manager.presets[selectedPresetIndex].rangeHaptics[rangeIdx] = $0 }
                 )) {
-                    ForEach(DiaWatchManager.HapticAlert.allPatterns, id: \.self) { pat in
+                    ForEach(GlyWatchManager.HapticAlert.allPatterns, id: \.self) { pat in
                         Text(Self.formatPattern(pat)).tag(pat)
                     }
                 }
@@ -815,7 +815,7 @@ struct DiaWatchSettingsView: View {
                     get: { manager.presets[selectedPresetIndex].hapticAlerts[alertIdx].pat },
                     set: { manager.presets[selectedPresetIndex].hapticAlerts[alertIdx].pat = $0 }
                 )) {
-                    ForEach(DiaWatchManager.HapticAlert.allPatterns, id: \.self) { pat in
+                    ForEach(GlyWatchManager.HapticAlert.allPatterns, id: \.self) { pat in
                         Text(Self.formatPattern(pat)).tag(pat)
                     }
                 }
@@ -831,7 +831,7 @@ struct DiaWatchSettingsView: View {
             header: Text("Test Haptics")
         ) {
             Picker("Pattern", selection: $selectedHapticPattern) {
-                ForEach(DiaWatchManager.HapticAlert.allPatterns, id: \.self) { pat in
+                ForEach(GlyWatchManager.HapticAlert.allPatterns, id: \.self) { pat in
                     Text(Self.formatPattern(pat)).tag(pat)
                 }
             }
@@ -1038,7 +1038,7 @@ struct DiaWatchSettingsView: View {
             }
             .padding(.vertical, 4)
 
-            NavigationLink(destination: DiaWatchCommandLogView(manager: manager)) {
+            NavigationLink(destination: GlyWatchCommandLogView(manager: manager)) {
                 HStack {
                     Image(systemName: "list.bullet.rectangle")
                     Text("Open command log")

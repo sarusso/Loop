@@ -17,11 +17,11 @@ extension UserDefaults {
         case loopNotRunningNotifications = "com.loopkit.Loop.loopNotRunningNotifications"
         case inFlightAutomaticDose = "com.loopkit.Loop.inFlightAutomaticDose"
         case favoriteFoods = "com.loopkit.Loop.favoriteFoods"
-        case diaWatchPeripheralID = "com.loopkit.Loop.DiaWatch.peripheralID"
-        case diaWatchDeviceName = "com.loopkit.Loop.DiaWatch.deviceName"
-        case diaWatchPresets = "com.loopkit.Loop.DiaWatch.presets"
-        case diaWatchTransmissionsEnabled = "com.loopkit.Loop.DiaWatch.transmissionsEnabled"
-        case diaWatchLastSentTs = "com.loopkit.Loop.DiaWatch.lastSentTs"
+        case glyWatchPeripheralID = "com.loopkit.Loop.GlyWatch.peripheralID"
+        case glyWatchDeviceName = "com.loopkit.Loop.GlyWatch.deviceName"
+        case glyWatchPresets = "com.loopkit.Loop.GlyWatch.presets"
+        case glyWatchTransmissionsEnabled = "com.loopkit.Loop.GlyWatch.transmissionsEnabled"
+        case glyWatchLastSentTs = "com.loopkit.Loop.GlyWatch.lastSentTs"
     }
 
     var legacyPumpManagerRawValue: PumpManager.RawValue? {
@@ -96,42 +96,42 @@ extension UserDefaults {
         }
     }
     
-    var diaWatchPeripheralID: UUID? {
+    var glyWatchPeripheralID: UUID? {
         get {
-            guard let str = string(forKey: Key.diaWatchPeripheralID.rawValue) else { return nil }
+            guard let str = string(forKey: Key.glyWatchPeripheralID.rawValue) else { return nil }
             return UUID(uuidString: str)
         }
-        set { set(newValue?.uuidString, forKey: Key.diaWatchPeripheralID.rawValue) }
+        set { set(newValue?.uuidString, forKey: Key.glyWatchPeripheralID.rawValue) }
     }
 
-    var diaWatchDeviceName: String? {
-        get { string(forKey: Key.diaWatchDeviceName.rawValue) }
-        set { set(newValue, forKey: Key.diaWatchDeviceName.rawValue) }
+    var glyWatchDeviceName: String? {
+        get { string(forKey: Key.glyWatchDeviceName.rawValue) }
+        set { set(newValue, forKey: Key.glyWatchDeviceName.rawValue) }
     }
 
-    var diaWatchTransmissionsEnabled: Bool {
+    var glyWatchTransmissionsEnabled: Bool {
         get {
             // Default true if never set, matching the previous in-memory default.
-            object(forKey: Key.diaWatchTransmissionsEnabled.rawValue) as? Bool ?? true
+            object(forKey: Key.glyWatchTransmissionsEnabled.rawValue) as? Bool ?? true
         }
-        set { set(newValue, forKey: Key.diaWatchTransmissionsEnabled.rawValue) }
+        set { set(newValue, forKey: Key.glyWatchTransmissionsEnabled.rawValue) }
     }
 
-    var diaWatchLastSentTs: Int {
-        get { integer(forKey: Key.diaWatchLastSentTs.rawValue) }
-        set { set(newValue, forKey: Key.diaWatchLastSentTs.rawValue) }
+    var glyWatchLastSentTs: Int {
+        get { integer(forKey: Key.glyWatchLastSentTs.rawValue) }
+        set { set(newValue, forKey: Key.glyWatchLastSentTs.rawValue) }
     }
 
-    var diaWatchPresets: [DiaWatchManager.Preset] {
+    var glyWatchPresets: [GlyWatchManager.Preset] {
         get {
-            guard let data = data(forKey: Key.diaWatchPresets.rawValue),
-                  let presets = try? JSONDecoder().decode([DiaWatchManager.Preset].self, from: data)
-            else { return [DiaWatchManager.Preset.defaultPreset] }
+            guard let data = data(forKey: Key.glyWatchPresets.rawValue),
+                  let presets = try? JSONDecoder().decode([GlyWatchManager.Preset].self, from: data)
+            else { return [GlyWatchManager.Preset.defaultPreset] }
             return presets
         }
         set {
             let data = try? JSONEncoder().encode(newValue)
-            set(data, forKey: Key.diaWatchPresets.rawValue)
+            set(data, forKey: Key.glyWatchPresets.rawValue)
         }
     }
 

@@ -1,12 +1,12 @@
 //
-//  DiaWatchCommandLogView.swift
+//  GlyWatchCommandLogView.swift
 //  Loop
 //
 
 import SwiftUI
 
-struct DiaWatchCommandLogView: View {
-    @ObservedObject var manager: DiaWatchManager
+struct GlyWatchCommandLogView: View {
+    @ObservedObject var manager: GlyWatchManager
     @State private var filter: Filter = .all
 
     enum Filter: String, CaseIterable, Identifiable {
@@ -23,7 +23,7 @@ struct DiaWatchCommandLogView: View {
         return f
     }()
 
-    private var filteredEntries: [DiaWatchManager.CommandLogEntry] {
+    private var filteredEntries: [GlyWatchManager.CommandLogEntry] {
         switch filter {
         case .all:    return manager.commandLog
         case .ok:     return manager.commandLog.filter { !$0.isError }
@@ -63,7 +63,7 @@ struct DiaWatchCommandLogView: View {
 }
 
 private struct CommandLogCard: View {
-    let entry: DiaWatchManager.CommandLogEntry
+    let entry: GlyWatchManager.CommandLogEntry
     let formatter: DateFormatter
 
     private var borderColor: Color {

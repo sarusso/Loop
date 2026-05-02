@@ -1,5 +1,5 @@
 //
-//  DiaWatchManager.swift
+//  GlyWatchManager.swift
 //  Loop
 //
 
@@ -8,7 +8,7 @@ import Foundation
 import HealthKit
 import LoopKit
 
-final class DiaWatchManager: NSObject, ObservableObject {
+final class GlyWatchManager: NSObject, ObservableObject {
 
     // MARK: - BLE UUIDs
 
@@ -195,13 +195,13 @@ final class DiaWatchManager: NSObject, ObservableObject {
     @Published var lastResponseDate: Date?
     @Published var hasTransmitted: Bool = false
     @Published var isStreaming: Bool = false
-    @Published var presets: [Preset] = UserDefaults.standard.diaWatchPresets
+    @Published var presets: [Preset] = UserDefaults.standard.glyWatchPresets
     @Published var bleResponse: String = ""
     @Published var pendingReadingsCount: Int = 0
     @Published var commandLog: [CommandLogEntry] = []
-    @Published var transmissionsEnabled: Bool = UserDefaults.standard.diaWatchTransmissionsEnabled {
+    @Published var transmissionsEnabled: Bool = UserDefaults.standard.glyWatchTransmissionsEnabled {
         didSet {
-            UserDefaults.standard.diaWatchTransmissionsEnabled = transmissionsEnabled
+            UserDefaults.standard.glyWatchTransmissionsEnabled = transmissionsEnabled
             if !transmissionsEnabled { transmissionQueue = [] }
         }
     }
@@ -246,18 +246,18 @@ final class DiaWatchManager: NSObject, ObservableObject {
     private var currentLogIsUserTriggered: Bool = false
 
     private weak var deviceManager: DeviceDataManager?
-    private let log = DiagnosticLog(category: "DiaWatchManager")
+    private let log = DiagnosticLog(category: "GlyWatchManager")
 
     // MARK: - Init
 
     init(deviceManager: DeviceDataManager) {
         self.deviceManager = deviceManager
-        self.pairedDeviceName = UserDefaults.standard.diaWatchDeviceName
+        self.pairedDeviceName = UserDefaults.standard.glyWatchDeviceName
         super.init()
         central = CBCentralManager(
             delegate: self,
             queue: .main,
-            options: [CBCentralManagerOptionRestoreIdentifierKey: "com.loopkit.DiaWatchManager"]
+            options: [CBCentralManagerOptionRestoreIdentifierKey: "com.loopkit.GlyWatchManager"]
         )
         NotificationCenter.default.addObserver(
             self,
@@ -286,14 +286,14 @@ final class DiaWatchManager: NSObject, ObservableObject {
         guard let dm = deviceManager else { return }
         let now = Date()
         let cap = Int(now.addingTimeInterval(-Self.maxBackfillInterval).timeIntervalSince1970)
-        let lastSent = UserDefaults.standard.diaWatchLastSentTs
+        let lastSent = UserDefaults.standard.glyWatchLastSentTs
         let floor = max(lastSent, cap)
         let floorDate = Date(timeIntervalSince1970: TimeInterval(floor))
         dm.glucoseStore.getGlucoseSamples(start: floorDate, end: nil) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
                 if case .success(let samples) = result {
-                    let lastSentNow = UserDefaults.standard.diaWatchLastSentTs
+                    let lastSentNow = UserDefaults.standard.glyWatchLastSentTs
                     self.pendingReadingsCount = samples.filter {
                         Int($0.startDate.timeIntervalSince1970) > lastSentNow
                     }.count
@@ -319,7 +319,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
     // MARK: - Push (glucose reading)
 
     func push() {
-        guard transmissionsEnabled, UserDefaults.standard.diaWatchPeripheralID != nil else { return }
+        guard transmissionsEnabled, UserDefaults.standard.glyWatchPeripheralID != nil else { return }
         drainReadings()
     }
 
@@ -331,8 +331,8 @@ final class DiaWatchManager: NSObject, ObservableObject {
     }
 
     func resetReadingsWatermark() {
-        UserDefaults.standard.diaWatchLastSentTs = 0
-        log.default("DiaWatch readings watermark reset to 0")
+        UserDefaults.standard.glyWatchLastSentTs = 0
+        log.default("GlyWatch readings watermark reset to 0")
         refreshPendingReadingsCount()
     }
 
@@ -342,7 +342,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
         let now = Date()
         let cap = Int(now.addingTimeInterval(-Self.maxBackfillInterval).timeIntervalSince1970)
-        let lastSent = UserDefaults.standard.diaWatchLastSentTs
+        let lastSent = UserDefaults.standard.glyWatchLastSentTs
         let floor = max(lastSent, cap)
         let floorDate = Date(timeIntervalSince1970: TimeInterval(floor))
 
@@ -352,16 +352,16 @@ final class DiaWatchManager: NSObject, ObservableObject {
                 guard let self else { return }
                 switch result {
                 case .failure(let error):
-                    self.log.error("DiaWatch drain query failed: %{public}@", String(describing: error))
+                    self.log.error("GlyWatch drain query failed: %{public}@", String(describing: error))
                     self.isDrainingReadings = false
                 case .success(let samples):
-                    let unsent = samples.filter { Int($0.startDate.timeIntervalSince1970) > UserDefaults.standard.diaWatchLastSentTs }
+                    let unsent = samples.filter { Int($0.startDate.timeIntervalSince1970) > UserDefaults.standard.glyWatchLastSentTs }
                     self.pendingReadingsCount = unsent.count
                     if unsent.isEmpty {
                         self.isDrainingReadings = false
                         return
                     }
-                    self.log.default("DiaWatch draining %{public}d unsent reading(s)", unsent.count)
+                    self.log.default("GlyWatch draining %{public}d unsent reading(s)", unsent.count)
                     self.sendNextInDrain(unsent[...])
                 }
             }
@@ -378,11 +378,11 @@ final class DiaWatchManager: NSObject, ObservableObject {
             return
         }
         let mgdl = Int(sample.quantity.doubleValue(for: .milligramsPerDeciliter))
-        let trend = diaWatchTrend(from: deviceManager?.glucoseDisplay(for: sample)?.trendType)
+        let trend = glyWatchTrend(from: deviceManager?.glucoseDisplay(for: sample)?.trendType)
         let ts = Int(sample.startDate.timeIntervalSince1970)
         let bf = remaining.count > 1 ? "True" : "False"
-        let message = "GB({\"app\":\"dw\",\"t\":\"r\",\"v\":\(mgdl),\"tr\":\"\(trend)\",\"ts\":\(ts),\"bf\":\(bf)})\r\n"
-        log.default("Sending DiaWatch reading: %{public}@", message)
+        let message = "GB({\"app\":\"gly\",\"t\":\"r\",\"v\":\(mgdl),\"tr\":\"\(trend)\",\"ts\":\(ts),\"bf\":\(bf)})\r\n"
+        log.default("Sending GlyWatch reading: %{public}@", message)
         beginTransmission(message) { [weak self] in
             guard let self else { return }
             self.evaluateResult(rejectMessage: "Unexpected watch response")
@@ -391,28 +391,28 @@ final class DiaWatchManager: NSObject, ObservableObject {
                 self.lastPushError = "Unexpected watch response"
             }
             if confirmed {
-                UserDefaults.standard.diaWatchLastSentTs = ts
+                UserDefaults.standard.glyWatchLastSentTs = ts
                 self.lastSentMgdl = mgdl
                 self.lastPushDate = Date()
                 self.lastPushValue = mgdl
                 self.lastPushReadingDate = sample.startDate
                 self.pendingReadingsCount = max(0, self.pendingReadingsCount - 1)
-                self.log.default("DiaWatch push complete (ts=%{public}d)", ts)
+                self.log.default("GlyWatch push complete (ts=%{public}d)", ts)
                 self.sendNextInDrain(remaining.dropFirst())
             } else {
                 // Stop the drain. Next LoopDataUpdated.glucose notification
                 // will re-query from the un-advanced watermark and retry
                 // this sample plus anything newer.
                 self.isDrainingReadings = false
-                self.log.default("DiaWatch reading send failed; drain paused, will retry on next notification")
+                self.log.default("GlyWatch reading send failed; drain paused, will retry on next notification")
             }
         }
     }
 
     private func sendOneOffReading(mgdl: Int, trend: String, ts: Int) {
-        let message = "GB({\"app\":\"dw\",\"t\":\"r\",\"v\":\(mgdl),\"tr\":\"\(trend)\",\"ts\":\(ts),\"bf\":False})\r\n"
+        let message = "GB({\"app\":\"gly\",\"t\":\"r\",\"v\":\(mgdl),\"tr\":\"\(trend)\",\"ts\":\(ts),\"bf\":False})\r\n"
         lastSentMgdl = mgdl
-        log.default("Sending DiaWatch reading (test): %{public}@", message)
+        log.default("Sending GlyWatch reading (test): %{public}@", message)
         let readingDate = Date(timeIntervalSince1970: TimeInterval(ts))
         beginTransmission(message, isUserTriggered: true) { [weak self] in
             guard let self else { return }
@@ -423,7 +423,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
             if self.lastPushError == nil && !self.bleResponse.contains("reading received") {
                 self.lastPushError = "Unexpected watch response"
             }
-            self.log.default("DiaWatch test push complete")
+            self.log.default("GlyWatch test push complete")
         }
     }
 
@@ -436,14 +436,14 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let rcJSON = "[" + preset.rangeCutoffs.map(String.init).joined(separator: ",") + "]"
         let rhJSON = "[" + preset.rangeHaptics.map { "\"\($0)\"" }.joined(separator: ",") + "]"
         let phJSON = "[" + preset.rangePlayHaptic.map { $0 ? "1" : "0" }.joined(separator: ",") + "]"
-        let rangesMsg = "GB({\"app\":\"dw\",\"t\":\"s_r\",\"p\":\(index),\"rc\":\(rcJSON),\"rh\":\(rhJSON),\"ph\":\(phJSON)})\r\n"
+        let rangesMsg = "GB({\"app\":\"gly\",\"t\":\"s_r\",\"p\":\(index),\"rc\":\(rcJSON),\"rh\":\(rhJSON),\"ph\":\(phJSON)})\r\n"
 
-        log.default("Sending DiaWatch preset %{public}d ranges", index)
+        log.default("Sending GlyWatch preset %{public}d ranges", index)
         beginTransmission(rangesMsg, isUserTriggered: true) { [weak self] in
             guard let self else { return }
             self.evaluateResult(rejectMessage: "Watch rejected ranges")
-            if self.lastPushError == nil { UserDefaults.standard.diaWatchPresets = self.presets }
-            self.log.default("DiaWatch preset %{public}d ranges saved", index)
+            if self.lastPushError == nil { UserDefaults.standard.glyWatchPresets = self.presets }
+            self.log.default("GlyWatch preset %{public}d ranges saved", index)
         }
     }
 
@@ -453,14 +453,14 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let preset = presets[index]
         let dsValue = preset.displayAlwaysOn ? "null" : "\(preset.displaySleepSec)"
         let fcValue = preset.forecaster == .none ? "null" : "\"\(preset.forecaster.rawValue)\""
-        let configMsg = "GB({\"app\":\"dw\",\"t\":\"s_c\",\"p\":\(index),\"n\":\"\(preset.name)\",\"rw\":\(preset.wakeOnReading ? 1 : 0),\"db\":\(preset.displayBrightness),\"ds\":\(dsValue),\"fc\":\(fcValue),\"od\":\(preset.od),\"nd\":\(preset.nd),\"st\":\(preset.st.rawValue),\"dt\":\(preset.dt.rawValue),\"lt\":\(preset.lt.rawValue),\"sp\":\(preset.sp.rawValue),\"lp\":\(preset.lp.rawValue)})\r\n"
+        let configMsg = "GB({\"app\":\"gly\",\"t\":\"s_c\",\"p\":\(index),\"n\":\"\(preset.name)\",\"rw\":\(preset.wakeOnReading ? 1 : 0),\"db\":\(preset.displayBrightness),\"ds\":\(dsValue),\"fc\":\(fcValue),\"od\":\(preset.od),\"nd\":\(preset.nd),\"st\":\(preset.st.rawValue),\"dt\":\(preset.dt.rawValue),\"lt\":\(preset.lt.rawValue),\"sp\":\(preset.sp.rawValue),\"lp\":\(preset.lp.rawValue)})\r\n"
 
-        log.default("Sending DiaWatch preset %{public}d general config", index)
+        log.default("Sending GlyWatch preset %{public}d general config", index)
         beginTransmission(configMsg, isUserTriggered: true) { [weak self] in
             guard let self else { return }
             self.evaluateResult(rejectMessage: "Watch rejected preset config")
-            if self.lastPushError == nil { UserDefaults.standard.diaWatchPresets = self.presets }
-            self.log.default("DiaWatch preset %{public}d general config saved", index)
+            if self.lastPushError == nil { UserDefaults.standard.glyWatchPresets = self.presets }
+            self.log.default("GlyWatch preset %{public}d general config saved", index)
         }
     }
 
@@ -470,20 +470,20 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let preset = presets[index]
         var commands: [(message: String, onComplete: (() -> Void)?, isUserTriggered: Bool)] = preset.hapticAlerts.enumerated().map { alertIdx, alert in
             let msg = alert.enabled
-                ? "GB({\"app\":\"dw\",\"t\":\"s_a\",\"p\":\(index),\"idx\":\(alertIdx),\"op\":\"\(alert.op)\",\"thr\":\(alert.thr),\"pat\":\"\(alert.pat)\"})\r\n"
-                : "GB({\"app\":\"dw\",\"t\":\"d_a\",\"p\":\(index),\"idx\":\(alertIdx)})\r\n"
+                ? "GB({\"app\":\"gly\",\"t\":\"s_a\",\"p\":\(index),\"idx\":\(alertIdx),\"op\":\"\(alert.op)\",\"thr\":\(alert.thr),\"pat\":\"\(alert.pat)\"})\r\n"
+                : "GB({\"app\":\"gly\",\"t\":\"d_a\",\"p\":\(index),\"idx\":\(alertIdx)})\r\n"
             return (message: msg, onComplete: nil, isUserTriggered: true)
         }
 
         commands[commands.count - 1].onComplete = { [weak self] in
             guard let self else { return }
             self.evaluateResult(rejectMessage: "Watch rejected alert config")
-            if self.lastPushError == nil { UserDefaults.standard.diaWatchPresets = self.presets }
-            self.log.default("DiaWatch preset %{public}d alerts saved", index)
+            if self.lastPushError == nil { UserDefaults.standard.glyWatchPresets = self.presets }
+            self.log.default("GlyWatch preset %{public}d alerts saved", index)
         }
 
         transmissionQueue = Array(commands.dropFirst())
-        log.default("Sending DiaWatch preset %{public}d alerts", index)
+        log.default("Sending GlyWatch preset %{public}d alerts", index)
         beginTransmission(commands[0].message, isUserTriggered: true, onComplete: commands[0].onComplete)
     }
 
@@ -510,26 +510,26 @@ final class DiaWatchManager: NSObject, ObservableObject {
         guard presets.count > 1, !isSending else { return }
 
         let lastIdx = presets.count - 1
-        let isPersistedToPhone = lastIdx < UserDefaults.standard.diaWatchPresets.count
+        let isPersistedToPhone = lastIdx < UserDefaults.standard.glyWatchPresets.count
 
         presets.removeLast()
-        UserDefaults.standard.diaWatchPresets = presets
+        UserDefaults.standard.glyWatchPresets = presets
 
         // If the preset was never saved to the phone, the watch doesn't know about it
         guard isPersistedToPhone else { return }
 
-        log.default("Deleting DiaWatch preset %{public}d", lastIdx)
-        beginTransmission("GB({\"app\":\"dw\",\"t\":\"d_p\",\"p\":\(lastIdx)})\r\n", isUserTriggered: true) { [weak self] in
+        log.default("Deleting GlyWatch preset %{public}d", lastIdx)
+        beginTransmission("GB({\"app\":\"gly\",\"t\":\"d_p\",\"p\":\(lastIdx)})\r\n", isUserTriggered: true) { [weak self] in
             guard let self else { return }
             self.evaluateResult(rejectMessage: "Watch rejected preset delete")
-            self.log.default("DiaWatch preset %{public}d deleted", lastIdx)
+            self.log.default("GlyWatch preset %{public}d deleted", lastIdx)
         }
     }
 
     func activatePreset(at index: Int) {
         guard !isSending, index < presets.count else { return }
-        let message = "GB({\"app\":\"dw\",\"t\":\"a_p\",\"p\":\(index)})\r\n"
-        log.default("Activating DiaWatch preset %{public}d", index)
+        let message = "GB({\"app\":\"gly\",\"t\":\"a_p\",\"p\":\(index)})\r\n"
+        log.default("Activating GlyWatch preset %{public}d", index)
         beginTransmission(message, isUserTriggered: true) { [weak self] in
             guard let self else { return }
             self.evaluateResult(rejectMessage: "Watch rejected preset activation")
@@ -551,13 +551,13 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let s  = cal.component(.second, from: now)
         let ff = TimeZone.current.secondsFromGMT(for: now)  // DST-aware
 
-        let message = "GB({\"app\":\"dw\",\"t\":\"s_t\",\"lt\":[\(y),\(mo),\(d),\(h),\(mi),\(s)],\"ff\":\(ff)})\r\n"
-        log.default("Setting DiaWatch time: lt=[%{public}d,%{public}d,%{public}d,%{public}d,%{public}d,%{public}d] ff=%{public}d",
+        let message = "GB({\"app\":\"gly\",\"t\":\"s_t\",\"lt\":[\(y),\(mo),\(d),\(h),\(mi),\(s)],\"ff\":\(ff)})\r\n"
+        log.default("Setting GlyWatch time: lt=[%{public}d,%{public}d,%{public}d,%{public}d,%{public}d,%{public}d] ff=%{public}d",
                     y, mo, d, h, mi, s, ff)
         beginTransmission(message, isUserTriggered: true) { [weak self] in
             guard let self else { return }
             self.evaluateResult(rejectMessage: "Watch rejected set time")
-            self.log.default("DiaWatch set time complete")
+            self.log.default("GlyWatch set time complete")
         }
     }
 
@@ -566,11 +566,11 @@ final class DiaWatchManager: NSObject, ObservableObject {
     func sendCustomCommand(_ text: String) {
         guard !isSending, !text.isEmpty else { return }
         let message = text.hasSuffix("\r\n") ? text : text + "\r\n"
-        log.default("Sending DiaWatch custom command: %{public}@", text)
+        log.default("Sending GlyWatch custom command: %{public}@", text)
         beginTransmission(message, isUserTriggered: true) { [weak self] in
             guard let self else { return }
             self.lastPushError = self.receivedResponse ? nil : "No response from watch"
-            self.log.default("DiaWatch custom command complete")
+            self.log.default("GlyWatch custom command complete")
         }
     }
 
@@ -597,11 +597,11 @@ final class DiaWatchManager: NSObject, ObservableObject {
     func testHaptic(name: String) {
         guard !isSending else { return }
         let message = "import wasp; wasp.Haptics.\(name)()\r\n"
-        log.default("Sending DiaWatch test haptic: %{public}@", name)
+        log.default("Sending GlyWatch test haptic: %{public}@", name)
         beginTransmission(message, isUserTriggered: true) { [weak self] in
             guard let self else { return }
             self.lastPushError = self.receivedResponse ? nil : "No response from watch"
-            self.log.default("DiaWatch test haptic complete")
+            self.log.default("GlyWatch test haptic complete")
         }
     }
 
@@ -610,7 +610,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
     private func beginTransmission(_ message: String, isUserTriggered: Bool = false, onComplete: (() -> Void)? = nil) {
         guard !isSending else {
             if transmissionsEnabled {
-                log.default("DiaWatch enqueue (busy) [%{public}d bytes]: %{public}@", message.utf8.count, message)
+                log.default("GlyWatch enqueue (busy) [%{public}d bytes]: %{public}@", message.utf8.count, message)
                 transmissionQueue.append((message: message, onComplete: onComplete, isUserTriggered: isUserTriggered))
             }
             return
@@ -620,14 +620,14 @@ final class DiaWatchManager: NSObject, ObservableObject {
         currentLogCommand = message
         currentLogIsUserTriggered = isUserTriggered
 
-        guard UserDefaults.standard.diaWatchPeripheralID != nil else {
+        guard UserDefaults.standard.glyWatchPeripheralID != nil else {
             simulateNoDevice()
             return
         }
 
         guard let msgData = message.data(using: .utf8) else { return }
 
-        log.default("DiaWatch TX [%{public}d bytes]: %{public}@", message.utf8.count, message)
+        log.default("GlyWatch TX [%{public}d bytes]: %{public}@", message.utf8.count, message)
 
         pendingCommandEcho = message.trimmingCharacters(in: .whitespacesAndNewlines)
         echoDetected = false
@@ -636,7 +636,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         }
         for (i, chunk) in pendingChunks.enumerated() {
             let asString = String(data: chunk, encoding: .utf8) ?? chunk.map { String(format: "%02x", $0) }.joined()
-            log.default("DiaWatch TX chunk %{public}d/%{public}d (%{public}d bytes): %{public}@",
+            log.default("GlyWatch TX chunk %{public}d/%{public}d (%{public}d bytes): %{public}@",
                         i + 1, pendingChunks.count, chunk.count, asString)
         }
 
@@ -686,7 +686,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         sendTimeoutTimer?.invalidate()
         sendTimeoutTimer = Timer.scheduledTimer(withTimeInterval: Self.sendTimeout, repeats: false) { [weak self] _ in
             guard let self, self.isSending else { return }
-            self.log.error("DiaWatch send timed out after %{public}g s", Self.sendTimeout)
+            self.log.error("GlyWatch send timed out after %{public}g s", Self.sendTimeout)
             self.abortSend(error: "Send timed out")
         }
     }
@@ -700,7 +700,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         responseTimer?.invalidate()
         responseTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             guard let self, let p = self.peripheral else { return }
-            self.log.default("DiaWatch response timer fired — disconnecting")
+            self.log.default("GlyWatch response timer fired — disconnecting")
             self.central.cancelPeripheralConnection(p)
         }
     }
@@ -736,7 +736,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
     private func connectOrScan() {
         guard central.state == .poweredOn else { return }
 
-        if let id = UserDefaults.standard.diaWatchPeripheralID,
+        if let id = UserDefaults.standard.glyWatchPeripheralID,
            let known = central.retrievePeripherals(withIdentifiers: [id]).first {
             peripheral = known
             known.delegate = self
@@ -769,10 +769,10 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
     func pair(_ device: DiscoveredDevice) {
         stopScan()
-        UserDefaults.standard.diaWatchPeripheralID = device.peripheral.identifier
-        UserDefaults.standard.diaWatchDeviceName = device.peripheral.name
+        UserDefaults.standard.glyWatchPeripheralID = device.peripheral.identifier
+        UserDefaults.standard.glyWatchDeviceName = device.peripheral.name
         pairedDeviceName = device.peripheral.name
-        log.default("Paired DiaWatch device: %{public}@ (%{public}@)", device.name, device.peripheral.identifier.uuidString)
+        log.default("Paired GlyWatch device: %{public}@ (%{public}@)", device.name, device.peripheral.identifier.uuidString)
     }
 
     func forget() {
@@ -782,15 +782,15 @@ final class DiaWatchManager: NSObject, ObservableObject {
         isSending = false
         pendingChunks = []
         onTransmissionComplete = nil
-        UserDefaults.standard.diaWatchPeripheralID = nil
-        UserDefaults.standard.diaWatchDeviceName = nil
+        UserDefaults.standard.glyWatchPeripheralID = nil
+        UserDefaults.standard.glyWatchDeviceName = nil
         pairedDeviceName = nil
         lastPushDate = nil
         lastPushValue = nil
         lastPushReadingDate = nil
         lastPushError = nil
         bleResponse = ""
-        log.default("Forgot DiaWatch device")
+        log.default("Forgot GlyWatch device")
     }
 
     // MARK: - REPL prompt probe
@@ -822,7 +822,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         // a multi-line input), we send Ctrl-C twice + \r to break out and
         // wait for >>>. If the watch is booting, no prompt arrives and we
         // time out safely instead of interrupting the boot sequence.
-        log.default("DiaWatch probing for REPL prompt (sending \\r)")
+        log.default("GlyWatch probing for REPL prompt (sending \\r)")
         p.writeValue(Data([0x0D]), for: rx, type: .withResponse)
 
         startPromptTimer()
@@ -830,7 +830,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
     private func sendCtrlCBreak() {
         guard let p = peripheral, let rx = rxCharacteristic else { return }
-        log.default("DiaWatch continuation prompt detected — sending \\x03\\x03 + \\r")
+        log.default("GlyWatch continuation prompt detected — sending \\x03\\x03 + \\r")
         sentCtrlC = true
         bleResponse = ""
         p.writeValue(Data([0x03, 0x03, 0x0D]), for: rx, type: .withResponse)
@@ -844,7 +844,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
             self.promptTimer = nil
             if self.waitingForPrompt {
                 self.waitingForPrompt = false
-                self.log.default("DiaWatch REPL prompt not received within %{public}.0f s", Self.promptTimeout)
+                self.log.default("GlyWatch REPL prompt not received within %{public}.0f s", Self.promptTimeout)
                 self.abortSend(error: "REPL not ready")
             }
         }
@@ -882,7 +882,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
     #if DEBUG
     /// Lightweight preview instance — no CoreBluetooth, no DeviceDataManager required.
-    static var preview: DiaWatchManager { DiaWatchManager() }
+    static var preview: GlyWatchManager { GlyWatchManager() }
 
     private override init() {
         self.deviceManager = nil
@@ -892,7 +892,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
     // MARK: - Trend mapping
 
-    private func diaWatchTrend(from trend: GlucoseTrend?) -> String {
+    private func glyWatchTrend(from trend: GlucoseTrend?) -> String {
         switch trend {
         case .upUpUp:       return "uuu"
         case .upUp:         return "uu"
@@ -908,7 +908,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
 
 // MARK: - CBCentralManagerDelegate
 
-extension DiaWatchManager: CBCentralManagerDelegate {
+extension GlyWatchManager: CBCentralManagerDelegate {
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         if central.state == .poweredOn && isSending {
@@ -924,7 +924,7 @@ extension DiaWatchManager: CBCentralManagerDelegate {
         advertisementData: [String: Any],
         rssi RSSI: NSNumber
     ) {
-        if isSending && peripheral.identifier == UserDefaults.standard.diaWatchPeripheralID {
+        if isSending && peripheral.identifier == UserDefaults.standard.glyWatchPeripheralID {
             // Found our target while fallback-scanning for a push
             central.stopScan()
             self.peripheral = peripheral
@@ -941,7 +941,7 @@ extension DiaWatchManager: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        log.error("DiaWatch connection failed: %{public}@", error?.localizedDescription ?? "unknown")
+        log.error("GlyWatch connection failed: %{public}@", error?.localizedDescription ?? "unknown")
         abortSend(error: error?.localizedDescription ?? "Connection failed")
     }
 
@@ -954,7 +954,7 @@ extension DiaWatchManager: CBCentralManagerDelegate {
 
         if isStreaming {
             isStreaming = false
-            log.default("DiaWatch log stream ended")
+            log.default("GlyWatch log stream ended")
             pushPhase = .idle
             return
         }
@@ -965,7 +965,7 @@ extension DiaWatchManager: CBCentralManagerDelegate {
 
         if wasStillSending {
             let msg = error?.localizedDescription ?? "Disconnected mid-send"
-            log.error("DiaWatch disconnected mid-send: %{public}@", msg)
+            log.error("GlyWatch disconnected mid-send: %{public}@", msg)
             onTransmissionComplete = nil
             isDrainingReadings = false
             appendCurrentCommandLogEntry(status: msg, response: bleResponse)
@@ -977,7 +977,7 @@ extension DiaWatchManager: CBCentralManagerDelegate {
             let queueStatus = lastPushError ?? (echoDetected ? "OK" : "No echo from watch")
             appendCurrentCommandLogEntry(status: queueStatus, response: bleResponse)
             let next = transmissionQueue.removeFirst()
-            log.default("Sending DiaWatch queued command")
+            log.default("Sending GlyWatch queued command")
             beginTransmission(next.message, isUserTriggered: next.isUserTriggered, onComplete: next.onComplete)
         } else {
             if !echoDetected { lastPushError = "No echo from watch" }
@@ -1014,13 +1014,13 @@ extension DiaWatchManager: CBCentralManagerDelegate {
 
 // MARK: - CBPeripheralDelegate
 
-extension DiaWatchManager: CBPeripheralDelegate {
+extension GlyWatchManager: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard error == nil,
               let service = peripheral.services?.first(where: { $0.uuid == Self.nusServiceUUID })
         else {
-            log.error("DiaWatch service discovery error: %{public}@", error?.localizedDescription ?? "NUS service not found")
+            log.error("GlyWatch service discovery error: %{public}@", error?.localizedDescription ?? "NUS service not found")
             central.cancelPeripheralConnection(peripheral)
             return
         }
@@ -1029,13 +1029,13 @@ extension DiaWatchManager: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         guard error == nil else {
-            log.error("DiaWatch characteristic discovery error: %{public}@", error!.localizedDescription)
+            log.error("GlyWatch characteristic discovery error: %{public}@", error!.localizedDescription)
             central.cancelPeripheralConnection(peripheral)
             return
         }
 
         guard let rx = service.characteristics?.first(where: { $0.uuid == Self.nusRXCharUUID }) else {
-            log.error("DiaWatch NUS RX characteristic not found")
+            log.error("GlyWatch NUS RX characteristic not found")
             central.cancelPeripheralConnection(peripheral)
             return
         }
@@ -1048,18 +1048,18 @@ extension DiaWatchManager: CBPeripheralDelegate {
             // probeForPrompt() will be called from didUpdateNotificationStateFor
         } else {
             // TX not found — try writing anyway
-            log.default("DiaWatch NUS TX characteristic not found, writing without subscription")
+            log.default("GlyWatch NUS TX characteristic not found, writing without subscription")
             probeForPrompt()
         }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
         if let error = error {
-            log.error("DiaWatch TX notify error: %{public}@", error.localizedDescription)
+            log.error("GlyWatch TX notify error: %{public}@", error.localizedDescription)
         }
         if isStreaming {
             // Streaming: just listen, no probe, no payload
-            log.default("DiaWatch log stream active")
+            log.default("GlyWatch log stream active")
             cancelSendTimeout()
             pushPhase = .streaming
         } else {
@@ -1074,7 +1074,7 @@ extension DiaWatchManager: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
         if let error = error {
-            log.error("DiaWatch chunk write failed: %{public}@", error.localizedDescription)
+            log.error("GlyWatch chunk write failed: %{public}@", error.localizedDescription)
             // Continue anyway — failures here are surfaced by the send timeout / response handling
         }
         writeNextChunk()
@@ -1095,7 +1095,7 @@ extension DiaWatchManager: CBPeripheralDelegate {
                 waitingForPrompt = false
                 cancelPromptTimer()
                 bleResponse = ""
-                log.default("DiaWatch REPL prompt detected — starting write")
+                log.default("GlyWatch REPL prompt detected — starting write")
                 writeNextChunk()
             case .continuation:
                 if !sentCtrlC { sendCtrlCBreak() }
@@ -1119,7 +1119,7 @@ extension DiaWatchManager: CBPeripheralDelegate {
         receivedResponse = true
         bleResponse += text
         lastResponseDate = Date()
-        log.default("DiaWatch TX: %{public}@", text)
+        log.default("GlyWatch TX: %{public}@", text)
 
         var justDetectedEcho = false
         if !echoDetected {
