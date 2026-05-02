@@ -380,7 +380,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
         let mgdl = Int(sample.quantity.doubleValue(for: .milligramsPerDeciliter))
         let trend = diaWatchTrend(from: deviceManager?.glucoseDisplay(for: sample)?.trendType)
         let ts = Int(sample.startDate.timeIntervalSince1970)
-        let bf = remaining.count > 1
+        let bf = remaining.count > 1 ? "True" : "False"
         let message = "GB({\"app\":\"dw\",\"t\":\"r\",\"v\":\(mgdl),\"tr\":\"\(trend)\",\"ts\":\(ts),\"bf\":\(bf)})\r\n"
         log.default("Sending DiaWatch reading: %{public}@", message)
         beginTransmission(message) { [weak self] in
@@ -410,7 +410,7 @@ final class DiaWatchManager: NSObject, ObservableObject {
     }
 
     private func sendOneOffReading(mgdl: Int, trend: String, ts: Int) {
-        let message = "GB({\"app\":\"dw\",\"t\":\"r\",\"v\":\(mgdl),\"tr\":\"\(trend)\",\"ts\":\(ts),\"bf\":false})\r\n"
+        let message = "GB({\"app\":\"dw\",\"t\":\"r\",\"v\":\(mgdl),\"tr\":\"\(trend)\",\"ts\":\(ts),\"bf\":False})\r\n"
         lastSentMgdl = mgdl
         log.default("Sending DiaWatch reading (test): %{public}@", message)
         let readingDate = Date(timeIntervalSince1970: TimeInterval(ts))
