@@ -596,7 +596,7 @@ final class GlyWatchManager: NSObject, ObservableObject {
 
     func testHaptic(name: String) {
         guard !isSending else { return }
-        let message = "import wasp; wasp.Haptics.\(name)()\r\n"
+        let message = "from utils import Haptics; Haptics.\(name)()\r\n"
         log.default("Sending GlyWatch test haptic: %{public}@", name)
         beginTransmission(message, isUserTriggered: true) { [weak self] in
             guard let self else { return }
