@@ -224,7 +224,7 @@ final class GlyWatchManager: NSObject, ObservableObject {
     private static let sendTimeout: TimeInterval = 15
     private var responseTimer: Timer?
     private static let responseInitialTimeout: TimeInterval = 20  // max wait for first byte
-    private static let responseIdleTimeout: TimeInterval = 1.5    // disconnect after this much silence
+    private static let responseIdleTimeout: TimeInterval = 5      // disconnect after this much silence
     private var waitingForPrompt: Bool = false
     private var sentCtrlC: Bool = false
     private var promptTimer: Timer?
@@ -380,7 +380,7 @@ final class GlyWatchManager: NSObject, ObservableObject {
         let mgdl = Int(sample.quantity.doubleValue(for: .milligramsPerDeciliter))
         let trend = glyWatchTrend(from: deviceManager?.glucoseDisplay(for: sample)?.trendType)
         let ts = Int(sample.startDate.timeIntervalSince1970)
-        let bf = remaining.count > 1 ? "True" : "False"
+        let bf = remaining.count > 1 ? "true" : "false"
         let message = "GB({\"app\":\"gly\",\"t\":\"r\",\"v\":\(mgdl),\"tr\":\"\(trend)\",\"ts\":\(ts),\"bf\":\(bf)})\r\n"
         log.default("Sending GlyWatch reading: %{public}@", message)
         beginTransmission(message) { [weak self] in
@@ -410,7 +410,7 @@ final class GlyWatchManager: NSObject, ObservableObject {
     }
 
     private func sendOneOffReading(mgdl: Int, trend: String, ts: Int) {
-        let message = "GB({\"app\":\"gly\",\"t\":\"r\",\"v\":\(mgdl),\"tr\":\"\(trend)\",\"ts\":\(ts),\"bf\":False})\r\n"
+        let message = "GB({\"app\":\"gly\",\"t\":\"r\",\"v\":\(mgdl),\"tr\":\"\(trend)\",\"ts\":\(ts),\"bf\":false})\r\n"
         lastSentMgdl = mgdl
         log.default("Sending GlyWatch reading (test): %{public}@", message)
         let readingDate = Date(timeIntervalSince1970: TimeInterval(ts))
