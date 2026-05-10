@@ -227,10 +227,17 @@ final class GlyWatchManager: NSObject, ObservableObject {
     private static let responseIdleTimeout: TimeInterval = 5      // disconnect after this much silence
     private var waitingForPrompt: Bool = false
     private var sentCtrlC: Bool = false
+    /// Accumulates every byte received during the probe phase (initial \r and
+    /// any Ctrl-C escalation), captured separately so it survives the
+    /// bleResponse clear that happens on >>> detection. Logged as its own
+    /// CommandLogEntry at probe completion.
+    private var probeResponse: String = ""
     private var promptTimer: Timer?
     private static let promptTimeout: TimeInterval = 5
     private var pendingCommandEcho: String?   // command text the REPL will echo back (no \r\n)
     private var echoDetected = false          // true once pendingCommandEcho seen in TX stream
+    private var chunkIndex: Int = 0           // 0-based index of next chunk to write
+    private var chunkTotal: Int = 0           // total chunks in current transmission
 
     // Reading-drain state. Backfill cap of 2h prevents flooding the watch
     // after long offline periods. lastSentTs is persisted so the watermark
@@ -634,11 +641,8 @@ final class GlyWatchManager: NSObject, ObservableObject {
         pendingChunks = stride(from: 0, to: msgData.count, by: 20).map {
             Data(msgData[$0 ..< min($0 + 20, msgData.count)])
         }
-        for (i, chunk) in pendingChunks.enumerated() {
-            let asString = String(data: chunk, encoding: .utf8) ?? chunk.map { String(format: "%02x", $0) }.joined()
-            log.default("GlyWatch TX chunk %{public}d/%{public}d (%{public}d bytes): %{public}@",
-                        i + 1, pendingChunks.count, chunk.count, asString)
-        }
+        chunkTotal = pendingChunks.count
+        chunkIndex = 0
 
         isSending = true
         onTransmissionComplete = onComplete
@@ -816,6 +820,10 @@ final class GlyWatchManager: NSObject, ObservableObject {
 
         waitingForPrompt = true
         sentCtrlC = false
+        // Clear stale buffer from any prior session so the prompt scan only
+        // sees what the watch actually sends in response to our \r.
+        bleResponse = ""
+        probeResponse = ""
 
         // Send a bare \r to solicit a prompt. If the REPL is at >>>, we
         // proceed. If it answers with ... (continuation prompt — stuck in
@@ -845,9 +853,32 @@ final class GlyWatchManager: NSObject, ObservableObject {
             if self.waitingForPrompt {
                 self.waitingForPrompt = false
                 self.log.default("GlyWatch REPL prompt not received within %{public}.0f s", Self.promptTimeout)
+                self.appendProbeLogEntry(status: self.sentCtrlC ? "Stuck in continuation" : "REPL not ready")
                 self.abortSend(error: "REPL not ready")
             }
         }
+    }
+
+    /// Build the probe's "command" representation for the log card: bare \r,
+    /// or "\r → \x03\x03\r" if Ctrl-C escalation happened.
+    private func probeLogCommand() -> String {
+        sentCtrlC ? "\\r → \\x03\\x03\\r" : "\\r"
+    }
+
+    /// Insert a CommandLogEntry for the just-completed probe.
+    private func appendProbeLogEntry(status: String) {
+        let entry = CommandLogEntry(
+            timestamp: Date(),
+            command: probeLogCommand(),
+            status: status,
+            response: probeResponse,
+            isUserTriggered: currentLogIsUserTriggered
+        )
+        commandLog.insert(entry, at: 0)
+        if commandLog.count > Self.maxLogEntries {
+            commandLog.removeLast(commandLog.count - Self.maxLogEntries)
+        }
+        probeResponse = ""
     }
 
     private func cancelPromptTimer() {
@@ -871,11 +902,34 @@ final class GlyWatchManager: NSObject, ObservableObject {
         if pushPhase != .sending { pushPhase = .sending }
 
         let chunk = pendingChunks.removeFirst()
+        chunkIndex += 1
+        // Per-chunk byte-level log (hex + ASCII-with-escapes) so a stray
+        // \r/\n inside a non-final chunk is visible in os_log.
+        let hex = chunk.map { String(format: "%02x", $0) }.joined(separator: " ")
+        let escaped = Self.escapeBytes(chunk)
+        log.default("GlyWatch TX chunk %{public}d/%{public}d (%{public}d bytes) hex=%{public}@ ascii=%{public}@",
+                    chunkIndex, chunkTotal, chunk.count, hex, escaped)
         // .withResponse: BLE link-layer ACKs each chunk before the next is sent,
         // pacing writes to whatever rate the watch can sustain — protects the
         // wasp-os RX buffer from overflow. Next chunk is sent from
         // peripheral(_:didWriteValueFor:error:) below.
         p.writeValue(chunk, for: rx, type: .withResponse)
+    }
+
+    /// Render bytes as ASCII with control chars/escapes visible:
+    /// \r, \n, \t, \xNN for other non-printables, otherwise the literal char.
+    private static func escapeBytes(_ data: Data) -> String {
+        var out = ""
+        for b in data {
+            switch b {
+            case 0x0D: out += "\\r"
+            case 0x0A: out += "\\n"
+            case 0x09: out += "\\t"
+            case 0x20...0x7E: out.append(Character(UnicodeScalar(b)))
+            default: out += String(format: "\\x%02x", b)
+            }
+        }
+        return out
     }
 
     // MARK: - Preview support
@@ -1090,11 +1144,13 @@ extension GlyWatchManager: CBPeripheralDelegate {
         //   ...  → REPL is in continuation; send Ctrl-C twice and wait for >>>
         if waitingForPrompt {
             bleResponse += text
+            probeResponse += text
             switch lastPromptIn(bleResponse) {
             case .ready:
                 waitingForPrompt = false
                 cancelPromptTimer()
                 bleResponse = ""
+                appendProbeLogEntry(status: sentCtrlC ? "OK after Ctrl-C" : "OK")
                 log.default("GlyWatch REPL prompt detected — starting write")
                 writeNextChunk()
             case .continuation:
