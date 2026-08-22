@@ -718,6 +718,16 @@
         }
       }
     },
+    "%@ %lld mg/dL" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ %2$lld mg/dL"
+          }
+        }
+      }
+    },
     "%@ absorbed" : {
       "comment" : "Formats absorbed carb value",
       "localizations" : {
@@ -1059,6 +1069,19 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 单位 总量"
+          }
+        }
+      }
+    },
+    "%@, idle" : {
+
+    },
+    "%@: %lld mg/dL (sent %@)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@: %2$lld mg/dL (sent %3$@)"
           }
         }
       }
@@ -3148,6 +3171,22 @@
         }
       }
     },
+    "%lld" : {
+
+    },
+    "%lld dBm" : {
+
+    },
+    "%lld mg/dL at %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld mg/dL at %2$@"
+          }
+        }
+      }
+    },
     "⚠️" : {
       "localizations" : {
         "da" : {
@@ -4218,6 +4257,9 @@
         }
       }
     },
+    "Above" : {
+
+    },
     "Absorption Time" : {
       "comment" : "Label for food absorption entry on add favorite food screen",
       "localizations" : {
@@ -5030,6 +5072,9 @@
         }
       }
     },
+    "Add" : {
+
+    },
     "Add a new favorite food" : {
       "comment" : "Button label to open new favorite food view",
       "localizations" : {
@@ -5094,6 +5139,9 @@
           }
         }
       }
+    },
+    "Add alert" : {
+
     },
     "Add Carb Entry" : {
       "comment" : "Title of the user activity for adding carbs",
@@ -5830,6 +5878,12 @@
           }
         }
       }
+    },
+    "Alert %@ will be removed from the watch and the phone." : {
+
+    },
+    "Alert id %@ will be removed from the watch." : {
+
     },
     "Alert Management" : {
       "comment" : "Alert Permissions button text\nTitle of alert management screen",
@@ -8505,6 +8559,9 @@
         }
       }
     },
+    "Awaiting response…" : {
+
+    },
     "Basal Rate Schedule" : {
       "comment" : "Details for configuration error when basal rate schedule is missing",
       "localizations" : {
@@ -8850,6 +8907,9 @@
           }
         }
       }
+    },
+    "Below" : {
+
     },
     "Bluetooth\nOff" : {
       "comment" : "Message to the user to that the bluetooth is off",
@@ -12960,6 +13020,9 @@
         }
       }
     },
+    "Command log" : {
+
+    },
     "Complete Setup" : {
       "comment" : "Title text for button to complete setup",
       "localizations" : {
@@ -13030,6 +13093,9 @@
           }
         }
       }
+    },
+    "Condition" : {
+
     },
     "Configuration" : {
       "comment" : "The title of the Configuration section in settings",
@@ -13303,6 +13369,9 @@
           }
         }
       }
+    },
+    "Connecting…" : {
+
     },
     "Continue" : {
       "comment" : "Button label for continue\nDefault alert dismissal",
@@ -14279,6 +14348,9 @@
         }
       }
     },
+    "Custom command" : {
+
+    },
     "Custom Override" : {
       "comment" : "The title of the cell indicating a generic temporary override is enabled",
       "extractionState" : "manual",
@@ -14523,6 +14595,9 @@
         }
       }
     },
+    "Cutoff: %lld mg/dL" : {
+
+    },
     "Date" : {
       "comment" : "Date picker label",
       "localizations" : {
@@ -14766,6 +14841,9 @@
           }
         }
       }
+    },
+    "Debug" : {
+
     },
     "Delete" : {
       "localizations" : {
@@ -15068,6 +15146,12 @@
           }
         }
       }
+    },
+    "Delete alert" : {
+
+    },
+    "Delete alert?" : {
+
     },
     "Delete All" : {
       "comment" : "Button title to delete all objects",
@@ -16154,6 +16238,12 @@
         }
       }
     },
+    "Direction" : {
+
+    },
+    "Disabled" : {
+
+    },
     "Disables" : {
       "comment" : "The action hint of the workout mode toggle button when enabled",
       "localizations" : {
@@ -16272,6 +16362,9 @@
           }
         }
       }
+    },
+    "Discard" : {
+
     },
     "Dismiss" : {
       "comment" : "Default alert dismissal\nThe button label of the action used to dismiss an error alert",
@@ -16392,6 +16485,12 @@
         }
       }
     },
+    "Display always on" : {
+
+    },
+    "Display brightness" : {
+
+    },
     "Display colors for glucose" : {
       "comment" : "Title for glucose coloring",
       "localizations" : {
@@ -16426,6 +16525,9 @@
         }
       }
     },
+    "Display sleep: %lld sec" : {
+
+    },
     "Display up to 4 items. Display label is in parentheses." : {
       "comment" : "Indicates the maximum number of items that can be displayed and how the label for each item is shortened.",
       "localizations" : {
@@ -16436,6 +16538,9 @@
           }
         }
       }
+    },
+    "Display wakes on new readings" : {
+
     },
     "Done" : {
       "localizations" : {
@@ -16785,6 +16890,9 @@
           }
         }
       }
+    },
+    "Edit alert" : {
+
     },
     "Enable\nBluetooth" : {
       "comment" : "Message to the user to enable bluetooth",
@@ -18955,6 +19063,9 @@
         }
       }
     },
+    "Filter" : {
+
+    },
     "Fingerstick Glucose" : {
       "comment" : "Label for manual glucose entry row on bolus screen",
       "localizations" : {
@@ -19576,6 +19687,12 @@
           }
         }
       }
+    },
+    "Forecaster" : {
+
+    },
+    "Forget" : {
+
     },
     "Frequently asked questions about alerts" : {
       "comment" : "Label for link to see frequently asked questions",
@@ -20669,6 +20786,15 @@
         }
       }
     },
+    "GlyWatch" : {
+
+    },
+    "Haptic" : {
+
+    },
+    "Haptic:" : {
+
+    },
     "HARDWARE SOUNDS" : {
       "localizations" : {
         "da" : {
@@ -20720,6 +20846,9 @@
           }
         }
       }
+    },
+    "High" : {
+
     },
     "High Glucose" : {
       "localizations" : {
@@ -21024,6 +21153,15 @@
           }
         }
       }
+    },
+    "ID" : {
+
+    },
+    "Identity" : {
+
+    },
+    "Idle" : {
+
     },
     "If iOS Focus Mode is ON and Mute Alerts is OFF, Critical Alerts will still be delivered and non-Critical Alerts will be silenced until %1$@ is added to each Focus mode as an Allowed App." : {
       "comment" : "Focus modes descriptive text (1: app name)",
@@ -23564,6 +23702,15 @@
         }
       }
     },
+    "Last push" : {
+
+    },
+    "Last transmission response" : {
+
+    },
+    "Last transmission response (@ %@)" : {
+
+    },
     "Launches CGM app" : {
       "comment" : "Glucose HUD accessibility hint",
       "extractionState" : "manual",
@@ -24325,6 +24472,9 @@
           }
         }
       }
+    },
+    "Looking for nearby BLE devices…" : {
+
     },
     "Loop Crashed" : {
       "comment" : "Title for crash recovery alert",
@@ -25108,6 +25258,9 @@
           }
         }
       }
+    },
+    "Low" : {
+
     },
     "Low Glucose" : {
       "comment" : "Title for bolus screen warning when glucose is below glucose warning limit.\nTitle for bolus screen warning when glucose is below suspend threshold, but a bolus is recommended",
@@ -25909,6 +26062,9 @@
           }
         }
       }
+    },
+    "Mid" : {
+
     },
     "Missed Meal Notifications" : {
       "comment" : "Title for missed meal notifications toggle",
@@ -27027,6 +27183,9 @@
         }
       }
     },
+    "New alert" : {
+
+    },
     "New Favorite Food" : {
       "comment" : "Title of new favorite food screen",
       "localizations" : {
@@ -27194,6 +27353,9 @@
         }
       }
     },
+    "No alerts configured" : {
+
+    },
     "No alerts or alarms will sound while muted. Select how long you would you like to mute for." : {
       "comment" : "Message for mute alert duration selection action sheet",
       "localizations" : {
@@ -27336,6 +27498,9 @@
         }
       }
     },
+    "No commands sent yet" : {
+
+    },
     "No connected devices, or failure during device connection" : {
       "comment" : "The error message displayed for device connection errors.",
       "localizations" : {
@@ -27454,6 +27619,15 @@
           }
         }
       }
+    },
+    "No data: %lld min" : {
+
+    },
+    "No device paired" : {
+
+    },
+    "No entries match the current filter" : {
+
     },
     "No Maximum Bolus Configured" : {
       "comment" : "Alert title for a missing maximum bolus setting error",
@@ -27644,6 +27818,9 @@
           }
         }
       }
+    },
+    "No readings pushed yet" : {
+
     },
     "No Recent Glucose" : {
       "comment" : "The title of the cell indicating that there is no recent glucose",
@@ -28939,6 +29116,9 @@
         }
       }
     },
+    "OK, idle" : {
+
+    },
     "On" : {
       "comment" : "Notification Setting Status is On",
       "localizations" : {
@@ -29070,6 +29250,12 @@
         }
       }
     },
+    "Open command log" : {
+
+    },
+    "Outdated data: %lld min" : {
+
+    },
     "Override Presets" : {
       "comment" : "The title text for the override presets",
       "extractionState" : "manual",
@@ -29195,6 +29381,21 @@
           }
         }
       }
+    },
+    "Pair" : {
+
+    },
+    "Paired" : {
+
+    },
+    "Pattern" : {
+
+    },
+    "Pending readings" : {
+
+    },
+    "Play on new readings" : {
+
     },
     "Possible Missed Meal" : {
       "comment" : "The notification title for a meal that was possibly not logged in Loop.",
@@ -30219,6 +30420,12 @@
           }
         }
       }
+    },
+    "preset name" : {
+
+    },
+    "Presets" : {
+
     },
     "Profile Expiration" : {
       "comment" : "Settings App Profile expiration view",
@@ -31661,6 +31868,9 @@
           }
         }
       }
+    },
+    "Push readings" : {
+
     },
     "QUANTITY_VALUE_AND_UNIT" : {
       "comment" : "Format string for combining localized numeric value and unit. (1: numeric value)(2: unit)",
@@ -33328,6 +33538,15 @@
         }
       }
     },
+    "Save changes to %@ before switching?" : {
+
+    },
+    "Save Required" : {
+
+    },
+    "Save this new preset before switching tabs." : {
+
+    },
     "Save without Bolusing" : {
       "comment" : "Button text to save carbs and/or manual glucose entry without a bolus",
       "localizations" : {
@@ -33422,6 +33641,15 @@
           }
         }
       }
+    },
+    "Scan for device" : {
+
+    },
+    "Scan for different device" : {
+
+    },
+    "Scanning…" : {
+
     },
     "Scheduled" : {
       "comment" : "Scheduled Delivery status text",
@@ -33569,6 +33797,9 @@
           }
         }
       }
+    },
+    "Sending…" : {
+
     },
     "Sensor Failed" : {
       "localizations" : {
@@ -34568,6 +34799,9 @@
         }
       }
     },
+    "Start log stream" : {
+
+    },
     "Start time is out of range: %@" : {
       "comment" : "Carb error description: invalid start time is out of range.",
       "localizations" : {
@@ -34882,6 +35116,18 @@
           }
         }
       }
+    },
+    "Status" : {
+
+    },
+    "Stop" : {
+
+    },
+    "Stop log stream" : {
+
+    },
+    "Streaming…" : {
+
     },
     "Support" : {
       "comment" : "Section title for Support\nThe title of the support section in settings",
@@ -35844,6 +36090,12 @@
           }
         }
       }
+    },
+    "Test Haptics" : {
+
+    },
+    "Test value: %lld mg/dL" : {
+
     },
     "TestFlight" : {
       "comment" : "Settings app TestFlight section",
@@ -36932,6 +37184,9 @@
         }
       }
     },
+    "The preset \"%@\" has unsaved changes. Discard them?" : {
+
+    },
     "Therapy Settings" : {
       "comment" : "Title text for button to Therapy Settings",
       "localizations" : {
@@ -37085,6 +37340,9 @@
           }
         }
       }
+    },
+    "Threshold: %lld mg/dL" : {
+
     },
     "Time Sensitive Alerts" : {
       "localizations" : {
@@ -38571,6 +38829,9 @@
           }
         }
       }
+    },
+    "Unsaved Changes" : {
+
     },
     "Unsupported Notification Service: %1$@" : {
       "comment" : "Error message when a service can't be found to handle a push notification. (1: Service Identifier)",

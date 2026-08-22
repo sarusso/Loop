@@ -86,7 +86,7 @@ The GlyWatch settings screen is divided into four sections:
 
 **Ranges tab:** 5 glucose ranges (Very Low / Low / OK / High / Very High) separated by 4 cutoff steppers. Each range has a haptic pattern picker and a "Play on new readings" toggle.
 
-**Alerts tab:** 5 individually configurable haptic alerts, each with an enable toggle, above/below operator, mg/dL threshold, and haptic pattern.
+**Alerts tab:** variable list of haptic alerts. Empty by default. Tap **Add alert** to create one (a 3-char lowercase alphanumeric id, collision-checked against the preset's existing alerts, is generated and shown read-only). Tap a row to open the editor sheet; swipe left to delete (with confirmation). The enabled toggle on each row auto-saves when flipped. Each alert is saved or deleted independently — there is no batch Save on this tab.
 
 ### Test Haptics section
 
@@ -157,19 +157,27 @@ All messages use the `GB({...})\r\n` envelope. The `app` key is always `"gly"`.
 ### Save alert (`t: "s_a"`) / Delete alert (`t: "d_a"`)
 
 ```json
-{"app":"gly","t":"s_a","p":0,"idx":0,"op":"<","thr":90,"pat":"single_buzz"}
-{"app":"gly","t":"d_a","p":0,"idx":0}
+{"app":"gly","t":"s_a","p":0,"id":"a7k","op":"<","thr":90,"pat":"single_buzz"}
+{"app":"gly","t":"d_a","p":0,"id":"a7k"}
 ```
 
 | Key | Type | Meaning |
 |---|---|---|
 | `p` | int | Preset index |
-| `idx` | int | Alert slot index (0-4) |
-| `op` | ">" or "<" | Comparison operator |
-| `thr` | int | Glucose threshold in mg/dL |
-| `pat` | string | Haptic pattern name |
+| `id` | string | Alert id — 3-char lowercase alphanumeric, unique within the preset, generated on the iOS side at "Add alert" time |
+| `op` | ">" or "<" | Comparison operator. Only present in `s_a` |
+| `thr` | int | Glucose threshold in mg/dL. Only present in `s_a` |
+| `pat` | string | Haptic pattern name. Only present in `s_a` |
 
-Enabled alerts send `s_a`; disabled alerts send `d_a`. All 5 slots are sent on each save.
+There is no batch save. Each alert is sent individually:
+- Adding a new alert, editing an existing one, or toggling its enabled state from disabled → enabled: one `s_a` with that alert's id.
+- Disabling an existing alert (from the editor sheet's `Enabled` toggle) **or** deleting it: one `d_a` with the id. The watch should forget the alert entirely either way — it doesn't distinguish disable from delete on the wire.
+
+The phone-side distinction:
+- **Disable**: alert stays in the preset's local list with `enabled=false`, so the user can re-enable later without re-entering op/thr/pat (a re-enable replays the same id via `s_a`).
+- **Delete** (Delete button in editor, or swipe-to-delete on the row): alert is removed from the local list entirely.
+
+There is no enumeration limit on the iOS side: a preset can carry any number of alerts.
 
 ### Activate preset (`t: "a_p"`)
 
@@ -216,7 +224,7 @@ New presets are created with these defaults:
 | 14 | `rangeCutoffs` | `[70, 100, 200, 300]` | Cutoff steppers | `rc` |
 | 15 | `rangeHaptics` | `["single_buzz", "notification", "notification_single", "stutter", "stutter_long"]` | Haptic per range | `rh` |
 | 16 | `rangePlayHaptic` | `[true, true, false, false, false]` | Play on new readings | `ph` |
-| 17 | `hapticAlerts` | Slot 1: disabled, `< 90`, `single_buzz`; slots 2-5: disabled, `> 180`, `single_buzz` | Alert 1-5 | `s_a` / `d_a` |
+| 17 | `hapticAlerts` | `[]` (no alerts) | Alerts list | `s_a` / `d_a` |
 
 ## Trend codes
 

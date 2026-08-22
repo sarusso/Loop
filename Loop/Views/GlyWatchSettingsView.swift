@@ -19,10 +19,14 @@ struct GlyWatchSettingsView: View {
     private enum ConfigTab: String, CaseIterable { case general = "General", ranges = "Ranges", alerts = "Alerts" }
     @State private var configTab: ConfigTab = .general
     @State private var generalDirty = false
-    @State private var alertsDirty = false
     @State private var rangesDirty = false
 
-    private enum ActiveButton { case none, test, saveGeneral, saveAlerts, saveRanges, activatePreset, deletePreset, testHaptic, customCommand, getLog, getPrevLog, setTime, battery, memFree, memLayout, uptime, ctrlC, resetWatermark, drainReadings }
+    /// State for the alert editor sheet. Nil means closed.
+    @State private var editingAlert: GlyWatchManager.HapticAlert? = nil
+    @State private var editingAlertIsNew: Bool = false
+    @State private var pendingDeleteAlertId: String? = nil
+
+    private enum ActiveButton { case none, test, saveGeneral, saveRanges, activatePreset, deletePreset, testHaptic, customCommand, getLog, getPrevLog, setTime, battery, memFree, memLayout, uptime, ctrlC, resetWatermark, drainReadings, saveAlert, deleteAlert }
     @State private var activeButton: ActiveButton = .none
 
     @FocusState private var presetNameFocused: Bool
@@ -33,7 +37,6 @@ struct GlyWatchSettingsView: View {
         var isError: Bool
     }
     @State private var saveGeneralStatus: ButtonStatus? = nil
-    @State private var saveAlertsStatus: ButtonStatus? = nil
     @State private var saveRangesStatus: ButtonStatus? = nil
     @State private var activatePresetStatus: ButtonStatus? = nil
     @State private var deletePresetStatus: ButtonStatus? = nil
@@ -125,7 +128,6 @@ struct GlyWatchSettingsView: View {
                 || current.lt != saved.lt
                 || current.sp != saved.sp
                 || current.lp != saved.lp
-            alertsDirty = current.hapticAlerts != saved.hapticAlerts
             rangesDirty = current.rangeCutoffs != saved.rangeCutoffs
                 || current.rangeHaptics != saved.rangeHaptics
                 || current.rangePlayHaptic != saved.rangePlayHaptic
@@ -141,7 +143,6 @@ struct GlyWatchSettingsView: View {
                     selectedPresetIndex = max(0, manager.presets.count - 1)
                 }
                 generalDirty = false
-                alertsDirty = false
                 rangesDirty = false
                 if pendingDismiss {
                     pendingDismiss = false
@@ -170,12 +171,11 @@ struct GlyWatchSettingsView: View {
                     case .general:
                         activeButton = .saveGeneral
                         manager.saveGeneralConfig(at: selectedPresetIndex)
-                    case .alerts:
-                        activeButton = .saveAlerts
-                        manager.saveAlerts(at: selectedPresetIndex)
                     case .ranges:
                         activeButton = .saveRanges
                         manager.saveRanges(at: selectedPresetIndex)
+                    case .alerts:
+                        break // alerts auto-save per-row; no batch path
                     }
                     configTab = tab
                     pendingTabSwitch = nil
@@ -190,8 +190,8 @@ struct GlyWatchSettingsView: View {
                     }
                     switch configTab {
                     case .general: generalDirty = false
-                    case .alerts:   alertsDirty = false
-                    case .ranges:     rangesDirty = false
+                    case .ranges:  rangesDirty = false
+                    case .alerts:  break
                     }
                     configTab = tab
                     pendingTabSwitch = nil
@@ -210,6 +210,43 @@ struct GlyWatchSettingsView: View {
         } message: {
             Text("Save this new preset before switching tabs.")
         }
+        .alert(
+            "Delete alert?",
+            isPresented: Binding(
+                get: { pendingDeleteAlertId != nil },
+                set: { if !$0 { pendingDeleteAlertId = nil } }
+            ),
+            presenting: pendingDeleteAlertId
+        ) { id in
+            Button("Delete", role: .destructive) {
+                activeButton = .deleteAlert
+                manager.deleteAlert(at: selectedPresetIndex, alertId: id)
+                pendingDeleteAlertId = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDeleteAlertId = nil
+            }
+        } message: { id in
+            Text("Alert id \(id) will be removed from the watch.")
+        }
+        .sheet(item: $editingAlert) { alert in
+            AlertEditorView(
+                manager: manager,
+                alert: alert,
+                isNew: editingAlertIsNew,
+                onSave: { updated, onDone in
+                    activeButton = .saveAlert
+                    manager.saveAlert(at: selectedPresetIndex, alert: updated, onResult: onDone)
+                },
+                onDelete: { id, onDone in
+                    activeButton = .deleteAlert
+                    manager.deleteAlert(at: selectedPresetIndex, alertId: id, onResult: onDone)
+                },
+                onClose: {
+                    editingAlert = nil
+                }
+            )
+        }
         .onChange(of: manager.pushPhase) { phase in
             guard phase == .idle else { return }
 
@@ -221,8 +258,9 @@ struct GlyWatchSettingsView: View {
             switch which {
             case .test:          text = isError ? (manager.lastPushError ?? "Failed") : "Sent!"
             case .saveGeneral:   text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
-            case .saveAlerts:     text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
-            case .saveRanges:     text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
+            case .saveAlert:     text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
+            case .deleteAlert:   text = isError ? (manager.lastPushError ?? "Failed") : "Deleted!"
+            case .saveRanges:    text = isError ? (manager.lastPushError ?? "Failed") : "Saved!"
             case .activatePreset: text = isError ? (manager.lastPushError ?? "Failed") : "Activated!"
             case .deletePreset:   text = isError ? (manager.lastPushError ?? "Failed") : "Deleted!"
             case .testHaptic:    text = isError ? (manager.lastPushError ?? "Failed") : "Played!"
@@ -249,10 +287,11 @@ struct GlyWatchSettingsView: View {
                 saveGeneralStatus = status
                 if !isError { generalDirty = false }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { saveGeneralStatus = nil }
-            case .saveAlerts:
-                saveAlertsStatus = status
-                if !isError { alertsDirty = false }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { saveAlertsStatus = nil }
+            case .saveAlert, .deleteAlert:
+                // Per-alert save lifecycle is managed by the editor sheet
+                // (sheet shows its own in-place status). No tab-level chrome
+                // needs updating here.
+                break
             case .saveRanges:
                 saveRangesStatus = status
                 if !isError { rangesDirty = false }
@@ -435,28 +474,30 @@ struct GlyWatchSettingsView: View {
 
     // MARK: - Configuration
 
-    private var anyDirty: Bool { generalDirty || alertsDirty || rangesDirty }
+    // Alerts tab uses per-alert save (no tab-level dirty/Save), so it's
+    // excluded from these helpers.
+    private var anyDirty: Bool { generalDirty || rangesDirty }
     private var currentTabDirty: Bool {
         switch configTab {
         case .general: return generalDirty
-        case .alerts:   return alertsDirty
-        case .ranges:     return rangesDirty
+        case .alerts:  return false
+        case .ranges:  return rangesDirty
         }
     }
 
     private func currentTabSaveStatus() -> ButtonStatus? {
         switch configTab {
         case .general: return saveGeneralStatus
-        case .alerts:   return saveAlertsStatus
-        case .ranges:     return saveRangesStatus
+        case .alerts:  return nil
+        case .ranges:  return saveRangesStatus
         }
     }
 
     private func currentTabSaveButtonId() -> ActiveButton {
         switch configTab {
         case .general: return .saveGeneral
-        case .alerts:   return .saveAlerts
-        case .ranges:     return .saveRanges
+        case .alerts:  return .saveAlert
+        case .ranges:  return .saveRanges
         }
     }
 
@@ -572,23 +613,26 @@ struct GlyWatchSettingsView: View {
             case .ranges:     rangesTabContent
             }
 
-            actionRow(
-                label: "Save",
-                id: currentTabSaveButtonId(),
-                dirty: currentTabDirty,
-                status: currentTabSaveStatus(),
-                disabled: !currentTabDirty
-            ) {
-                switch configTab {
-                case .general:
-                    activeButton = .saveGeneral
-                    manager.saveGeneralConfig(at: selectedPresetIndex)
-                case .alerts:
-                    activeButton = .saveAlerts
-                    manager.saveAlerts(at: selectedPresetIndex)
-                case .ranges:
-                    activeButton = .saveRanges
-                    manager.saveRanges(at: selectedPresetIndex)
+            // Alerts tab has its own per-alert save flow (in the editor sheet
+            // and the row toggle), so the tab-level Save row is hidden there.
+            if configTab != .alerts {
+                actionRow(
+                    label: "Save",
+                    id: currentTabSaveButtonId(),
+                    dirty: currentTabDirty,
+                    status: currentTabSaveStatus(),
+                    disabled: !currentTabDirty
+                ) {
+                    switch configTab {
+                    case .general:
+                        activeButton = .saveGeneral
+                        manager.saveGeneralConfig(at: selectedPresetIndex)
+                    case .ranges:
+                        activeButton = .saveRanges
+                        manager.saveRanges(at: selectedPresetIndex)
+                    case .alerts:
+                        break
+                    }
                 }
             }
         }
@@ -693,8 +737,79 @@ struct GlyWatchSettingsView: View {
 
     @ViewBuilder
     private var alertsTabContent: some View {
-        ForEach(manager.presets[selectedPresetIndex].hapticAlerts.indices, id: \.self) { idx in
-            hapticAlertRow(alertIdx: idx)
+        let alerts = manager.presets[selectedPresetIndex].hapticAlerts
+        if alerts.isEmpty {
+            Text("No alerts configured")
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 8)
+        }
+        ForEach(alerts) { alert in
+            alertRow(alert)
+        }
+        Button {
+            let id = manager.generateUniqueAlertId(forPresetAt: selectedPresetIndex)
+            editingAlert = GlyWatchManager.HapticAlert(
+                id: id,
+                enabled: true,
+                op: "<",
+                thr: 70,
+                pat: GlyWatchManager.HapticAlert.allPatterns[0]
+            )
+            editingAlertIsNew = true
+        } label: {
+            HStack {
+                Image(systemName: "plus.circle.fill")
+                Text("Add alert")
+            }
+        }
+        .disabled(manager.pushPhase != .idle)
+    }
+
+    @ViewBuilder
+    private func alertRow(_ alert: GlyWatchManager.HapticAlert) -> some View {
+        HStack(spacing: 10) {
+            Text(alert.id)
+                .font(.system(.caption, design: .monospaced))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color(UIColor.tertiarySystemFill))
+                )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(alert.op == ">" ? "Above" : "Below") \(alert.thr) mg/dL")
+                    .foregroundColor(alert.enabled ? .primary : .secondary)
+                Text(Self.formatPattern(alert.pat))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            // Read-only enabled state — change is only possible from the
+            // editor sheet (open by tapping the row), to avoid accidental
+            // BLE round-trips from row-level toggles.
+            Text(alert.enabled ? "Enabled" : "Disabled")
+                .font(.caption)
+                .foregroundColor(alert.enabled ? .green : .secondary)
+
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            editingAlert = alert
+            editingAlertIsNew = false
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) {
+                pendingDeleteAlertId = alert.id
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
         }
     }
 
@@ -780,49 +895,6 @@ struct GlyWatchSettingsView: View {
         .listRowSeparator(.hidden)
     }
 
-    @ViewBuilder
-    private func hapticAlertRow(alertIdx: Int) -> some View {
-        let alert = manager.presets[selectedPresetIndex].hapticAlerts[alertIdx]
-        VStack(alignment: .leading, spacing: 6) {
-            Toggle("Alert \(alertIdx + 1)", isOn: Binding(
-                get: { manager.presets[selectedPresetIndex].hapticAlerts[alertIdx].enabled },
-                set: { manager.presets[selectedPresetIndex].hapticAlerts[alertIdx].enabled = $0 }
-            ))
-            if alert.enabled {
-                HStack(spacing: 12) {
-                    Picker("", selection: Binding(
-                        get: { manager.presets[selectedPresetIndex].hapticAlerts[alertIdx].op },
-                        set: { manager.presets[selectedPresetIndex].hapticAlerts[alertIdx].op = $0 }
-                    )) {
-                        Text("Above").tag(">")
-                        Text("Below").tag("<")
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 130)
-
-                    Stepper(
-                        "\(manager.presets[selectedPresetIndex].hapticAlerts[alertIdx].thr) mg/dL",
-                        value: Binding(
-                            get: { manager.presets[selectedPresetIndex].hapticAlerts[alertIdx].thr },
-                            set: { manager.presets[selectedPresetIndex].hapticAlerts[alertIdx].thr = $0 }
-                        ),
-                        in: 40...400,
-                        step: 10
-                    )
-                }
-
-                Picker("Haptic", selection: Binding(
-                    get: { manager.presets[selectedPresetIndex].hapticAlerts[alertIdx].pat },
-                    set: { manager.presets[selectedPresetIndex].hapticAlerts[alertIdx].pat = $0 }
-                )) {
-                    ForEach(GlyWatchManager.HapticAlert.allPatterns, id: \.self) { pat in
-                        Text(Self.formatPattern(pat)).tag(pat)
-                    }
-                }
-            }
-        }
-        .padding(.vertical, 2)
-    }
 
     // MARK: - Test Haptics
 
@@ -1115,6 +1187,151 @@ private extension View {
             self.scrollDismissesKeyboard(.interactively)
         } else {
             self
+        }
+    }
+}
+
+/// Modal editor for a single haptic alert. Used for both creating new alerts
+/// (id pre-generated, shown read-only) and editing existing ones. While a
+/// save or delete is in flight the form is greyed out and the watch's BLE
+/// pipeline status is mirrored at the top.
+struct AlertEditorView: View {
+    @ObservedObject var manager: GlyWatchManager
+    @State var alert: GlyWatchManager.HapticAlert
+    let isNew: Bool
+    let onSave: (GlyWatchManager.HapticAlert, @escaping (Bool, String?) -> Void) -> Void
+    let onDelete: (String, @escaping (Bool, String?) -> Void) -> Void
+    let onClose: () -> Void
+
+    @State private var inFlight = false
+    @State private var errorMessage: String? = nil
+    @State private var pendingDelete: Bool = false
+
+    private static func formatPattern(_ pat: String) -> String {
+        pat.split(separator: "_").map { $0.capitalized }.joined(separator: " ")
+    }
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(header: Text("Status")) {
+                    statusRow
+                }
+
+                Section(header: Text("Identity")) {
+                    HStack {
+                        Text("ID")
+                        Spacer()
+                        Text(alert.id)
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundColor(.secondary)
+                    }
+                    Toggle("Enabled", isOn: $alert.enabled)
+                }
+
+                Section(header: Text("Condition")) {
+                    Picker("Direction", selection: $alert.op) {
+                        Text("Above").tag(">")
+                        Text("Below").tag("<")
+                    }
+                    .pickerStyle(.segmented)
+
+                    Stepper(
+                        "Threshold: \(alert.thr) mg/dL",
+                        value: $alert.thr,
+                        in: 40...400,
+                        step: 5
+                    )
+                }
+
+                Section(header: Text("Haptic")) {
+                    Picker("Pattern", selection: $alert.pat) {
+                        ForEach(GlyWatchManager.HapticAlert.allPatterns, id: \.self) { pat in
+                            Text(Self.formatPattern(pat)).tag(pat)
+                        }
+                    }
+                }
+
+                if !isNew {
+                    Section {
+                        Button(role: .destructive) {
+                            pendingDelete = true
+                        } label: {
+                            HStack {
+                                Spacer()
+                                Text("Delete alert")
+                                Spacer()
+                            }
+                        }
+                    }
+                }
+            }
+            .disabled(inFlight)
+            .opacity(inFlight ? 0.5 : 1.0)
+            .navigationBarTitle(isNew ? "New alert" : "Edit alert", displayMode: .inline)
+            .navigationBarItems(
+                leading: Button("Cancel") { onClose() }
+                    .disabled(inFlight),
+                trailing: Button(isNew ? "Add" : "Save") {
+                    inFlight = true
+                    errorMessage = nil
+                    onSave(alert) { ok, error in
+                        inFlight = false
+                        if ok {
+                            onClose()
+                        } else {
+                            errorMessage = error ?? "Save failed"
+                        }
+                    }
+                }
+                .disabled(inFlight)
+            )
+            .alert("Delete alert?", isPresented: $pendingDelete) {
+                Button("Delete", role: .destructive) {
+                    inFlight = true
+                    errorMessage = nil
+                    onDelete(alert.id) { ok, error in
+                        inFlight = false
+                        if ok {
+                            onClose()
+                        } else {
+                            errorMessage = error ?? "Delete failed"
+                        }
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Alert \(alert.id) will be removed from the watch and the phone.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var statusRow: some View {
+        HStack(spacing: 5) {
+            switch manager.pushPhase {
+            case .connecting:
+                ProgressView().scaleEffect(0.75)
+                Text("Connecting…").foregroundColor(.secondary)
+            case .sending:
+                ProgressView().scaleEffect(0.75)
+                Text("Sending…").foregroundColor(.secondary)
+            case .awaitingResponse:
+                ProgressView().scaleEffect(0.75)
+                Text("Awaiting response…").foregroundColor(.secondary)
+            case .streaming:
+                ProgressView().scaleEffect(0.75)
+                Text("Streaming…").foregroundColor(.secondary)
+            case .idle:
+                if let err = errorMessage {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundColor(.orange)
+                    Text(err).foregroundColor(.orange)
+                } else {
+                    Text("Idle").foregroundColor(.secondary)
+                }
+            }
+            Spacer()
         }
     }
 }

@@ -18,7 +18,8 @@ final class GlyWatchManager: NSObject, ObservableObject {
 
     // MARK: - Haptic alert model
 
-    struct HapticAlert: Codable, Equatable {
+    struct HapticAlert: Codable, Equatable, Identifiable {
+        var id: String      // 3-char lowercase alphanumeric, unique within preset
         var enabled: Bool
         var op: String      // ">" or "<"
         var thr: Int        // glucose threshold in mg/dL
@@ -29,14 +30,6 @@ final class GlyWatchManager: NSObject, ObservableObject {
             "heartbeat", "urgent", "linear_ramp", "short_long", "long_short",
             "double_tap", "notification", "notification_single", "bounce", "rbounce", "countdown",
             "stutter", "stutter_short", "stutter_long", "sos", "fanfare", "uprising_sweep"
-        ]
-
-        static let defaults: [HapticAlert] = [
-            HapticAlert(enabled: false, op: "<", thr: 90, pat: "single_buzz"),
-            HapticAlert(enabled: false, op: "<", thr: 90, pat: "single_buzz"),
-            HapticAlert(enabled: false, op: "<", thr: 90, pat: "single_buzz"),
-            HapticAlert(enabled: false, op: "<", thr: 90, pat: "single_buzz"),
-            HapticAlert(enabled: false, op: "<", thr: 90, pat: "single_buzz"),
         ]
     }
 
@@ -110,10 +103,10 @@ final class GlyWatchManager: NSObject, ObservableObject {
             rangeCutoffs: defaultRangeCutoffs,
             rangeHaptics: defaultRangeHaptics,
             rangePlayHaptic: defaultRangePlayHaptic,
-            hapticAlerts: HapticAlert.defaults
+            hapticAlerts: []
         )
 
-        init(name: String, wakeOnReading: Bool, displayBrightness: Int = 2, displayAlwaysOn: Bool = false, displaySleepSec: Int = 10, forecaster: Forecaster = .trend, od: Int = 10, nd: Int = 30, st: ButtonAndTapAction = .nothing, dt: ButtonAndTapAction = .wake, lt: ButtonAndTapAction = .nothing, sp: ButtonAndTapAction = .wake, lp: ButtonAndTapAction = .haptics, rangeCutoffs: [Int] = Preset.defaultRangeCutoffs, rangeHaptics: [String] = Preset.defaultRangeHaptics, rangePlayHaptic: [Bool] = Preset.defaultRangePlayHaptic, hapticAlerts: [HapticAlert]) {
+        init(name: String, wakeOnReading: Bool, displayBrightness: Int = 2, displayAlwaysOn: Bool = false, displaySleepSec: Int = 10, forecaster: Forecaster = .trend, od: Int = 10, nd: Int = 30, st: ButtonAndTapAction = .nothing, dt: ButtonAndTapAction = .wake, lt: ButtonAndTapAction = .nothing, sp: ButtonAndTapAction = .wake, lp: ButtonAndTapAction = .haptics, rangeCutoffs: [Int] = Preset.defaultRangeCutoffs, rangeHaptics: [String] = Preset.defaultRangeHaptics, rangePlayHaptic: [Bool] = Preset.defaultRangePlayHaptic, hapticAlerts: [HapticAlert] = []) {
             self.name = name
             self.wakeOnReading = wakeOnReading
             self.displayBrightness = displayBrightness
@@ -151,7 +144,9 @@ final class GlyWatchManager: NSObject, ObservableObject {
             rangeCutoffs = try c.decodeIfPresent([Int].self, forKey: .rangeCutoffs) ?? Preset.defaultRangeCutoffs
             rangeHaptics = try c.decodeIfPresent([String].self, forKey: .rangeHaptics) ?? Preset.defaultRangeHaptics
             rangePlayHaptic = try c.decodeIfPresent([Bool].self, forKey: .rangePlayHaptic) ?? Preset.defaultRangePlayHaptic
-            hapticAlerts = try c.decode([HapticAlert].self, forKey: .hapticAlerts)
+            // Resilient decode: any alerts from prior schema (no id field) fail
+            // the whole array decode → fall back to empty. New format only.
+            hapticAlerts = (try? c.decode([HapticAlert].self, forKey: .hapticAlerts)) ?? []
         }
     }
 
@@ -471,27 +466,109 @@ final class GlyWatchManager: NSObject, ObservableObject {
         }
     }
 
-    func saveAlerts(at index: Int) {
-        guard !isSending, index < presets.count else { return }
-
-        let preset = presets[index]
-        var commands: [(message: String, onComplete: (() -> Void)?, isUserTriggered: Bool)] = preset.hapticAlerts.enumerated().map { alertIdx, alert in
-            let msg = alert.enabled
-                ? "GB({\"app\":\"gly\",\"t\":\"s_a\",\"p\":\(index),\"idx\":\(alertIdx),\"op\":\"\(alert.op)\",\"thr\":\(alert.thr),\"pat\":\"\(alert.pat)\"})\r\n"
-                : "GB({\"app\":\"gly\",\"t\":\"d_a\",\"p\":\(index),\"idx\":\(alertIdx)})\r\n"
-            return (message: msg, onComplete: nil, isUserTriggered: true)
+    /// Save (or disable) a single alert.
+    ///
+    /// Wire behaviour:
+    /// - `alert.enabled == true`  → send `s_a` with op/thr/pat
+    /// - `alert.enabled == false` → send `d_a` (the watch forgets it)
+    /// - Special case: if the alert is **new** AND already disabled at save
+    ///   time, BLE is skipped entirely — `d_a` for an id the watch has never
+    ///   seen is a no-op, so the round-trip is waste. The alert is just
+    ///   stored locally with `enabled=false`.
+    ///
+    /// Local behaviour:
+    /// - On BLE success → upsert with the alert exactly as supplied.
+    /// - On BLE failure → upsert with `enabled` forced to `false`. The user's
+    ///   field values (op/thr/pat) are still persisted, so they can retry
+    ///   without re-entering them, and the alert state correctly reflects
+    ///   that the watch does NOT have it active.
+    /// - Removal from the phone-side list only happens via `deleteAlert`.
+    func saveAlert(at presetIndex: Int, alert: HapticAlert, onResult: ((Bool, String?) -> Void)? = nil) {
+        guard !isSending, presetIndex < presets.count else {
+            onResult?(false, "Busy or invalid preset")
+            return
         }
 
-        commands[commands.count - 1].onComplete = { [weak self] in
+        let existsLocally = presets[presetIndex].hapticAlerts.contains(where: { $0.id == alert.id })
+        if !alert.enabled && !existsLocally {
+            // New + disabled: nothing to push to the watch, just store locally.
+            log.default("GlyWatch alert id=%{public}@ created locally, disabled — skipping BLE", alert.id)
+            presets[presetIndex].hapticAlerts.append(alert)
+            UserDefaults.standard.glyWatchPresets = presets
+            onResult?(true, nil)
+            return
+        }
+
+        let message: String
+        if alert.enabled {
+            message = "GB({\"app\":\"gly\",\"t\":\"s_a\",\"p\":\(presetIndex),\"id\":\"\(alert.id)\",\"op\":\"\(alert.op)\",\"thr\":\(alert.thr),\"pat\":\"\(alert.pat)\"})\r\n"
+            log.default("Saving GlyWatch alert id=%{public}@ in preset %{public}d", alert.id, presetIndex)
+        } else {
+            message = "GB({\"app\":\"gly\",\"t\":\"d_a\",\"p\":\(presetIndex),\"id\":\"\(alert.id)\"})\r\n"
+            log.default("Disabling GlyWatch alert id=%{public}@ in preset %{public}d (sending d_a, keeping locally)", alert.id, presetIndex)
+        }
+        beginTransmission(message, isUserTriggered: true) { [weak self] in
             guard let self else { return }
-            self.evaluateResult(rejectMessage: "Watch rejected alert config")
-            if self.lastPushError == nil { UserDefaults.standard.glyWatchPresets = self.presets }
-            self.log.default("GlyWatch preset %{public}d alerts saved", index)
+            self.evaluateResult(rejectMessage: "Watch rejected alert")
+            // Upsert in both success and failure cases. On failure force
+            // enabled=false so local state reflects "watch does NOT have it
+            // active right now" — user keeps their op/thr/pat and can retry.
+            var stored = alert
+            if self.lastPushError != nil { stored.enabled = false }
+            if let i = self.presets[presetIndex].hapticAlerts.firstIndex(where: { $0.id == alert.id }) {
+                self.presets[presetIndex].hapticAlerts[i] = stored
+            } else {
+                self.presets[presetIndex].hapticAlerts.append(stored)
+            }
+            UserDefaults.standard.glyWatchPresets = self.presets
+            if self.lastPushError == nil {
+                self.log.default("GlyWatch alert %{public}@ saved", alert.id)
+                onResult?(true, nil)
+            } else {
+                self.log.default("GlyWatch alert %{public}@ save failed; stored locally as disabled", alert.id)
+                onResult?(false, self.lastPushError)
+            }
         }
+    }
 
-        transmissionQueue = Array(commands.dropFirst())
-        log.default("Sending GlyWatch preset %{public}d alerts", index)
-        beginTransmission(commands[0].message, isUserTriggered: true, onComplete: commands[0].onComplete)
+    /// Tell the watch to drop the alert with this id, then remove it locally.
+    func deleteAlert(at presetIndex: Int, alertId: String, onResult: ((Bool, String?) -> Void)? = nil) {
+        guard !isSending, presetIndex < presets.count else {
+            onResult?(false, "Busy or invalid preset")
+            return
+        }
+        let message = "GB({\"app\":\"gly\",\"t\":\"d_a\",\"p\":\(presetIndex),\"id\":\"\(alertId)\"})\r\n"
+        log.default("Deleting GlyWatch alert id=%{public}@ in preset %{public}d", alertId, presetIndex)
+        beginTransmission(message, isUserTriggered: true) { [weak self] in
+            guard let self else { return }
+            self.evaluateResult(rejectMessage: "Watch rejected alert delete")
+            if self.lastPushError == nil {
+                self.presets[presetIndex].hapticAlerts.removeAll { $0.id == alertId }
+                UserDefaults.standard.glyWatchPresets = self.presets
+                self.log.default("GlyWatch alert %{public}@ deleted", alertId)
+                onResult?(true, nil)
+            } else {
+                onResult?(false, self.lastPushError)
+            }
+        }
+    }
+
+    /// Generate a 3-char lowercase alphanumeric id that does not collide with
+    /// any existing alert in the preset. 36³ = 46,656 namespace — practically
+    /// no contention even at hundreds of alerts.
+    func generateUniqueAlertId(forPresetAt index: Int) -> String {
+        guard index < presets.count else { return Self.randomAlertId() }
+        let existing = Set(presets[index].hapticAlerts.map { $0.id })
+        for _ in 0..<100 {
+            let candidate = Self.randomAlertId()
+            if !existing.contains(candidate) { return candidate }
+        }
+        return Self.randomAlertId()
+    }
+
+    private static func randomAlertId() -> String {
+        let chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+        return String((0..<3).compactMap { _ in chars.randomElement() })
     }
 
     static let maxPresets = 4
@@ -500,8 +577,7 @@ final class GlyWatchManager: NSObject, ObservableObject {
         guard presets.count < Self.maxPresets else { return }
         let newPreset = Preset(
             name: "Preset \(presets.count)",
-            wakeOnReading: false,
-            hapticAlerts: HapticAlert.defaults
+            wakeOnReading: false
         )
         presets.append(newPreset)
     }
