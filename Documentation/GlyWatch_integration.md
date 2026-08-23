@@ -86,7 +86,23 @@ The GlyWatch settings screen is divided into four sections:
 
 **Ranges tab:** 5 glucose ranges (Very Low / Low / OK / High / Very High) separated by 4 cutoff steppers. Each range has a haptic pattern picker and a "Play on new readings" toggle.
 
-**Alerts tab:** variable list of haptic alerts. Empty by default. Tap **Add alert** to create one (a 3-char lowercase alphanumeric id, collision-checked against the preset's existing alerts, is generated and shown read-only). Tap a row to open the editor sheet; swipe left to delete (with confirmation). The enabled toggle on each row auto-saves when flipped. Each alert is saved or deleted independently — there is no batch Save on this tab.
+**Alerts tab:** variable list of alerts, empty by default. Tap **Add alert** to create one, tap a row to edit it, or swipe left to delete (with confirmation). Each alert is saved or deleted independently — there is no batch Save on this tab. A **Re-send all to watch** row appears when the preset has at least one enabled alert; see [Re-sending](#re-sending).
+
+Rows show the alert's id, a one-line summary of what it tests, and a detail line (trigger, haptic, screen-on, ack, remind/repeat, priority). A row whose configuration the watch would reject is flagged in red; a row that is valid but likely not to behave as expected — a forecast alert in a preset with no forecaster, for instance — is flagged in orange.
+
+A field that the [applicability matrix](#applicability-matrix) forbids for the current trigger/condition pair is removed from the form, and cleared on the model at the same time, so it can never reach the wire. Picking **No data** leaves the Firing section showing Trigger alone; picking **Above**/**Below** drops the Window row. **Add**/**Save** stays disabled while the alert is invalid, and the reason is shown in the Status row.
+
+The editor's sections are Status, Identity (ID, Enabled), **Firing** (Trigger, Condition, Value, Window), Actions (screen, haptic), Escalation (ack, remind, repeat, priority), and any warnings.
+
+Trigger sits in the same section as the fields it gates, so fields appear and disappear directly under the control that governs them.
+
+A single footer covers the section: what event evaluates the alert, and what that evaluation looks at, updating live as the fields change.
+
+> Evaluated on every new forecast using 45 min of readings plus all the 15 min forecast.
+
+For `od`/`nd` it is the event alone — "Fires when there has been no reading for this preset's no-data threshold" — since those take no condition, value or window. On a forecast trigger in a preset with no forecaster, "This preset has no forecaster, so this alert will never fire" is appended.
+
+Three UI labels differ from the firmware's names on purpose: **Value** is the firmware's *threshold* (`v`), **Repeat** is its *re-arm* (`rp`), and **Remind** is its *nag* (`ins`) — "nag" is informal and reads poorly for non-native speakers. Trigger and Condition match `tr` and `c`.
 
 ### Test Haptics section
 
@@ -157,27 +173,124 @@ All messages use the `GB({...})\r\n` envelope. The `app` key is always `"gly"`.
 ### Save alert (`t: "s_a"`) / Delete alert (`t: "d_a"`)
 
 ```json
-{"app":"gly","t":"s_a","p":0,"id":"a7k","op":"<","thr":90,"pat":"single_buzz"}
+{"app":"gly","t":"s_a","p":0,"id":"a7k","tr":"dp","c":"lt","v":70,"so":1,"pat":"sos","ack":1,"ins":60,"rp":1800,"pr":5}
 {"app":"gly","t":"d_a","p":0,"id":"a7k"}
 ```
 
 | Key | Type | Meaning |
 |---|---|---|
 | `p` | int | Preset index |
-| `id` | string | Alert id — 3-char lowercase alphanumeric, unique within the preset, generated on the iOS side at "Add alert" time |
-| `op` | ">" or "<" | Comparison operator. Only present in `s_a` |
-| `thr` | int | Glucose threshold in mg/dL. Only present in `s_a` |
-| `pat` | string | Haptic pattern name. Only present in `s_a` |
+| `id` | string | Alert id — exactly 3 alphanumeric characters, unique within the preset. Companion-owned and companion-generated |
+| `tr` | string | Trigger: `dp` new datapoint, `f15`/`f30` forecast at that horizon, `od` outdated data, `nd` no data |
+| `c` | string | Condition: `gt`, `lt`, `avg_gt`, `avg_lt`, `all_gt`, `all_lt`, `any_gt`, `any_lt` |
+| `w` | int | Window in seconds, 300–7200, meaningful in 300 s steps. The **total span** of the window, ending at the trigger's forecast horizon — not an amount of history |
+| `v` | int | Threshold in mg/dL |
+| `so` | 0/1 | Turn the screen on when firing |
+| `pat` | string or null | Haptic pattern name; `null` = silent. Unknown names are stored but fire nothing |
+| `ack` | 0/1 | Acknowledgment required |
+| `ins` | int or null | While un-acked, re-run the actions every `ins` seconds. Minimum 60. `null` = never nag |
+| `rp` | int or null | Re-arm after `rp` seconds even if the condition still holds. Minimum 60. `null` = edge-trigger |
+| `pr` | int | Priority, set by the user (0–9). Higher number = higher priority: when several alerts match at once the highest fires, ties breaking to the smallest id |
+
+`d_a` carries only `p` and `id`.
+
+Keys the matrix marks FORBIDDEN for a given trigger/condition pair are **omitted** rather than sent as `null` — the watch treats an omitted optional key and an explicit `null` identically, and omitting keeps the line inside the watch's ~256-byte REPL buffer. Loop refuses to send any line over 250 bytes rather than let it be truncated into a syntax error.
+
+#### Applicability matrix
+
+Loop enforces this before touching BLE. The watch rejects a violation with nothing but a log line and saves nothing, so a round-trip would tell the user less than the phone already knows.
+
+| `tr` | `c` | `w` | `v` |
+|---|---|---|---|
+| `dp` + `gt`/`lt` | required | forbidden | required |
+| `dp` + `avg`/`all`/`any` | required | **required** | required |
+| `f15`/`f30` + `gt`/`lt` | required | forbidden | required |
+| `f15`/`f30` + `avg`/`all`/`any` | required | optional (omitted = the forecast points alone) | required |
+| `od`, `nd` | forbidden | forbidden | forbidden |
+
+#### What the conditions mean
+
+The trigger picks the data, the condition tests it:
+
+- `dp` — the real reading series (24 slots, 5-min spaced, 2 h). Anchor = the newest reading.
+- `f15`/`f30` — the forecast series (6 slots, 5-min spaced). Anchor = the forecast at +15/+30 min. **Forecast alerts only ever fire when the preset has a forecaster** (`s_c` with `"fc":"Trend"`); otherwise they silently never match. Loop warns about this in the editor rather than blocking it, since the fix is on the General tab.
+- `od`/`nd` — data freshness against the preset's `od`/`nd` minutes. No condition, window or threshold.
+
+`gt`/`lt` test the anchor point alone and forbid `w` — for a forecast trigger the anchor is the forecast value at +15/+30 min.
+
+`avg`/`all`/`any` test a window. `w` is required on `dp` — there is nothing else to bound the reading series — and optional on a forecast trigger, where omitting it means the forecast points alone. The window is a *total span* ending at the trigger's horizon, not an amount of history: it always holds `w // 300` points, and the forecast occupies the last `horizon // 300` of them.
+
+```
+horizon  =  0 (dp) | 900 (f15) | 1800 (f30)     seconds past "now"
+history  =  w − horizon
+points   =  w // 300
+```
+
+So a 1 h window on `f15` is 45 min of readings plus the 15 min forecast (12 points); the same 1 h on `dp` is a plain hour of readings (12 points). Setting `w` equal to the horizon gives the forecast alone — `w=1800` on `f30` is the six forecast points and no history.
+
+That last case selects the same points as omitting `w` entirely. Loop always sends an explicit `w` rather than relying on the optional form, so the window stepper reads:
+
+```
+f15:   15 min → 20 min → 25 min → … → 2 h     (default 15 min)
+f30:   30 min → 35 min → 40 min → … → 2 h     (default 30 min)
+dp:     5 min → 10 min → …       → 2 h        (default 1 h)
+```
+
+The lowest position on a forecast trigger is the forecast on its own; every position above it adds real history. The Firing footer names the split as it changes — "using all the 15 min forecast", or "using 45 min of readings plus all the 15 min forecast".
+
+Missing datapoints are skipped, and at least one usable point is required for a match.
+
+**`w` must be at least the horizon.** A shorter window would be a tail slice of the forecast with no history at all, and the watch does not admit it. Loop's window stepper floors at the trigger's horizon and validation rejects anything below it, so every position is the forecast plus some (possibly zero) amount of history. The Firing footer shows the resulting split live as the window is changed.
+
+| Alert | `tr` | `c` | `w` | `v` |
+|---|---|---|---|---|
+| No data | `nd` | — | — | — |
+| Current value below 70 | `dp` | `lt` | — | 70 |
+| 15-min forecast below 80 | `f15` | `lt` | — | 80 |
+| Last hour + 30-min forecast above 200 | `f30` | `all_gt` | 5400 | 200 |
+| 2-hour average above 250 | `dp` | `avg_gt` | 7200 | 250 |
+| Any forecast point below 80 | `f30` | `any_lt` | 1800 (or omitted) | 80 |
+
+#### Firing behaviour
+
+- **Edge-triggered.** An alert fires once when its condition starts matching, then stays latched until the condition stops or `rp` elapses. `rp=1800` re-alerts every 30 min while the condition persists.
+- **One fire per evaluation.** The highest `pr` wins; already-latched alerts don't compete, so several can be latched at once. Priority is set per alert in the editor and is not derived from anything — a hypo alert only outranks a hyper one if you give it a higher number.
+- Glucose alerts evaluate on each reading; `od`/`nd` and the `rp`/`ins` timers on the watch's minute tick.
+- All firing and ack state is runtime-only — a reboot or preset switch clears it, and nothing re-fires until the next evaluation.
+
+#### On the watch
+
+- **Alerts face** (swipe right from the dashboard): the ids of currently firing alerts, or "No alerts".
+- `ack=1` alerts present a fullscreen "!" with the id below. One tap or button press acknowledges, stopping the `ins` nagging for that episode; the alert stays listed until the episode ends. The view is dismissed by display sleep and re-presented on every wake and every nag until acked.
+- `so` and `ack` are independent: `so=0` + `ack=1` is the "dark ack" — haptics only, button press acknowledges without the screen ever lighting. Loop permits it, but warns when `ack=1` + no nag + screen off would make an alert easy to miss entirely.
+
+The id is the only thing identifying an alert on the watch. Loop generates a random 3-character lowercase alphanumeric id at "Add alert" time, checked against the preset's existing ids, and the field stays editable while the alert is new — so an alert you expect to see fired at you can be given something you will recognise.
+
+#### Save, disable, delete
 
 There is no batch save. Each alert is sent individually:
-- Adding a new alert, editing an existing one, or toggling its enabled state from disabled → enabled: one `s_a` with that alert's id.
-- Disabling an existing alert (from the editor sheet's `Enabled` toggle) **or** deleting it: one `d_a` with the id. The watch should forget the alert entirely either way — it doesn't distinguish disable from delete on the wire.
+
+- Adding a new alert, editing an existing one, or re-enabling a disabled one: one `s_a` with that alert's id. Re-sending an existing id overwrites in place — that is the update path.
+- Disabling an existing alert or deleting it: one `d_a` with the id. The watch forgets the alert entirely either way; it doesn't distinguish disable from delete on the wire.
 
 The phone-side distinction:
-- **Disable**: alert stays in the preset's local list with `enabled=false`, so the user can re-enable later without re-entering op/thr/pat (a re-enable replays the same id via `s_a`).
-- **Delete** (Delete button in editor, or swipe-to-delete on the row): alert is removed from the local list entirely.
 
-There is no enumeration limit on the iOS side: a preset can carry any number of alerts.
+- **Disable** — the alert stays in the preset's local list with `enabled=false`, so it can be re-enabled later without re-entering its settings.
+- **Delete** — the alert is removed from the local list entirely.
+
+A *new* alert that is already disabled when saved skips BLE altogether: `d_a` for an id the watch has never seen is a no-op.
+
+On a send failure the alert is still stored locally, but with `enabled` forced to `false`. The user keeps their settings for a retry, and the local state honestly reflects that the watch does not have the alert active.
+
+The id is immutable once saved — renaming would orphan the watch-side file, since `d_a` for the old id would never be sent. The editor makes the field read-only when editing; delete and re-add to change it.
+
+#### Re-sending
+
+The watch has no list-alerts command, never generates ids and never detects collisions: **the phone is the sole source of truth for what alerts exist.** The two can drift — most notably after a firmware update, which drops every alert file stored under an older schema.
+
+**Re-send all to watch** on the Alerts tab pushes every *enabled* alert in the preset, one command per connection, stopping at the first failure and reporting how far it got. An alert that fails local validation is skipped rather than aborting the run, so one bad alert can't block the rest of the preset from being restored.
+
+Duplicate ids are checked on the phone at save time for the same reason: the watch overwrites blindly on a repeated id, so an unchecked duplicate would silently clobber another alert on the device.
 
 ### Activate preset (`t: "a_p"`)
 
@@ -224,7 +337,7 @@ New presets are created with these defaults:
 | 14 | `rangeCutoffs` | `[70, 100, 200, 300]` | Cutoff steppers | `rc` |
 | 15 | `rangeHaptics` | `["single_buzz", "notification", "notification_single", "stutter", "stutter_long"]` | Haptic per range | `rh` |
 | 16 | `rangePlayHaptic` | `[true, true, false, false, false]` | Play on new readings | `ph` |
-| 17 | `hapticAlerts` | `[]` (no alerts) | Alerts list | `s_a` / `d_a` |
+| 17 | `hapticAlerts` | `[]` (no alerts) | Alerts tab | `s_a` / `d_a` |
 
 ## Trend codes
 

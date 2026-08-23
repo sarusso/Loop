@@ -18,12 +18,126 @@ final class GlyWatchManager: NSObject, ObservableObject {
 
     // MARK: - Haptic alert model
 
+    /// What data the alert watches. The trigger picks the series, the
+    /// condition tests it.
+    enum AlertTrigger: String, Codable, CaseIterable {
+        case datapoint = "dp"     // real reading series (24 slots, 5-min spaced); anchor = newest
+        case forecast15 = "f15"   // forecast series (6 slots); anchor = +15 min
+        case forecast30 = "f30"   // forecast series (6 slots); anchor = +30 min
+        case outdated = "od"      // reading older than the preset's `od` minutes
+        case noData = "nd"        // nothing at all for the preset's `nd` minutes
+
+        var label: String {
+            switch self {
+            case .datapoint:  return "New reading"
+            case .forecast15: return "New 15-min forecast"
+            case .forecast30: return "New 30-min forecast"
+            case .outdated:   return "Outdated data"
+            case .noData:     return "No data"
+            }
+        }
+
+        /// Freshness triggers take no condition, window or threshold.
+        var isFreshness: Bool { self == .outdated || self == .noData }
+
+        /// Forecast alerts never fire unless the preset has a forecaster set.
+        var isForecast: Bool { self == .forecast15 || self == .forecast30 }
+
+        /// How far past "now" the far edge of a window sits, in seconds.
+        /// A window is a *total span* ending at this point, so an hour-long
+        /// window on `f15` is 45 min of readings plus the 15 min forecast.
+        var horizon: Int {
+            switch self {
+            case .forecast15: return 900
+            case .forecast30: return 1800
+            case .datapoint, .outdated, .noData: return 0
+            }
+        }
+    }
+
+    /// How the trigger's data is tested. `gt`/`lt` test the anchor point
+    /// alone; the rest test a window of points.
+    enum AlertCondition: String, Codable, CaseIterable {
+        case gt, lt
+        case avgGt = "avg_gt", avgLt = "avg_lt"
+        case allGt = "all_gt", allLt = "all_lt"
+        case anyGt = "any_gt", anyLt = "any_lt"
+
+        var label: String {
+            switch self {
+            case .gt:    return "Above"
+            case .lt:    return "Below"
+            case .avgGt: return "Average above"
+            case .avgLt: return "Average below"
+            case .allGt: return "All above"
+            case .allLt: return "All below"
+            case .anyGt: return "Any above"
+            case .anyLt: return "Any below"
+            }
+        }
+
+        /// avg/all/any test the last `w // 300` readings (plus, on a forecast
+        /// trigger, the forecast points up to the horizon). gt/lt forbid a
+        /// window entirely.
+        var isWindowed: Bool {
+            switch self {
+            case .gt, .lt: return false
+            default:       return true
+            }
+        }
+
+        var isAbove: Bool {
+            switch self {
+            case .gt, .avgGt, .allGt, .anyGt: return true
+            default:                          return false
+            }
+        }
+    }
+
     struct HapticAlert: Codable, Equatable, Identifiable {
-        var id: String      // 3-char lowercase alphanumeric, unique within preset
+        /// Exactly 3 alphanumeric characters, unique within the preset.
+        /// User-visible on the watch (Alerts face and the ack screen), so it
+        /// is meant to be readable — "lo1", "hi2", "f80" — not random.
+        /// Companion-owned: the watch never generates ids and never detects
+        /// collisions, and re-sending an existing id overwrites in place.
+        var id: String
+        /// Phone-side only, never on the wire: enabled sends `s_a`, disabled
+        /// sends `d_a` (the watch forgets the alert either way).
         var enabled: Bool
-        var op: String      // ">" or "<"
-        var thr: Int        // glucose threshold in mg/dL
-        var pat: String     // pattern name
+        var trigger: AlertTrigger
+        /// Required for dp/f15/f30, forbidden for od/nd.
+        var condition: AlertCondition?
+        /// Value in mg/dL to test against. Required except for od/nd.
+        var value: Int?
+        /// Window in seconds, 300...7200 in 300 s steps. Required for a
+        /// windowed operator on `dp`, optional on a forecast trigger (nil =
+        /// the forecast points alone), forbidden for gt/lt and od/nd.
+        ///
+        /// This is the *total span* of the window, ending at the trigger's
+        /// horizon — not an amount of history. On `f15` a 1 h window is
+        /// 45 min of readings plus the 15 min forecast; on `dp` it is a
+        /// plain hour of readings. Either way the window holds
+        /// `window / 300` points.
+        var window: Int?
+        /// Turn the screen on when the alert fires.
+        var screenOn: Bool
+        /// Haptic pattern name; nil = silent. Unknown names are accepted and
+        /// stored by the watch but fire nothing.
+        var pattern: String?
+        /// Acknowledgment required: fullscreen "!" with the id, cleared by
+        /// one tap or one button press.
+        var ackRequired: Bool
+        /// While un-acked, re-run the actions every `nagInterval` seconds.
+        /// Minimum 60. nil = never remind. Shown in the UI as "Remind until
+        /// acknowledged"; the property keeps its name because renaming it
+        /// would change the Codable key and silently drop the stored value.
+        var nagInterval: Int?
+        /// Re-arm after this many seconds even if the condition still holds.
+        /// Minimum 60. nil = edge-trigger, one fire per episode.
+        var repeatInterval: Int?
+        /// When several alerts match at once the highest priority fires, ties
+        /// breaking to the smallest id. Higher number = higher priority.
+        var priority: Int
 
         static let allPatterns: [String] = [
             "simple_pulse", "single_buzz", "single_buzz_short", "single_buzz_long", "double_buzz", "triple_buzz", "triple_tap",
@@ -31,6 +145,154 @@ final class GlyWatchManager: NSObject, ObservableObject {
             "double_tap", "notification", "notification_single", "bounce", "rbounce", "countdown",
             "stutter", "stutter_short", "stutter_long", "sos", "fanfare", "uprising_sweep"
         ]
+
+        static let idLength = 3
+        static let minWindow = 300
+        static let maxWindow = 7200
+        static let windowStep = 300
+        /// `ins` and `rp` are minute-granularity on the watch.
+        static let minInterval = 60
+
+        static let defaultNew = HapticAlert(
+            id: "",
+            enabled: true,
+            trigger: .datapoint,
+            condition: .lt,
+            value: 70,
+            window: nil,
+            screenOn: true,
+            pattern: "single_buzz",
+            ackRequired: false,
+            nagInterval: nil,
+            repeatInterval: nil,
+            priority: 0
+        )
+
+        static func isValidId(_ id: String) -> Bool {
+            id.count == idLength && id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
+        }
+
+        /// Blocking problems. The watch rejects these with a logged error and
+        /// saves nothing, so the companion refuses to send them at all.
+        /// Mirrors the firmware's applicability matrix.
+        var validationError: String? {
+            guard Self.isValidId(id) else {
+                return "ID must be exactly \(Self.idLength) letters or digits"
+            }
+
+            if trigger.isFreshness {
+                if condition != nil { return "\(trigger.label) alerts take no condition" }
+                if window != nil    { return "\(trigger.label) alerts take no window" }
+                if value != nil     { return "\(trigger.label) alerts take no value" }
+                return nil
+            }
+
+            guard let condition else { return "Pick a condition" }
+            guard value != nil else { return "Pick a value" }
+
+            if condition.isWindowed {
+                // Required on `dp`: there is nothing else to bound the reading
+                // series. Optional on a forecast trigger, where omitting it
+                // means the forecast points alone — the same set of points as
+                // `w == horizon`, so Loop always sends the explicit form.
+                if trigger == .datapoint && window == nil {
+                    return "\(condition.label) on a new reading needs a window"
+                }
+            } else if window != nil {
+                return "\(condition.label) tests a single point — remove the window"
+            }
+
+            if let window {
+                guard window >= Self.minWindow, window <= Self.maxWindow else {
+                    return "Window must be between 5 min and 2 h"
+                }
+                guard window % Self.windowStep == 0 else {
+                    return "Window must be a multiple of 5 min"
+                }
+                // The window ends at the horizon, so a shorter one would be a
+                // tail slice of the forecast with no history. The watch does
+                // not admit that.
+                guard window >= trigger.horizon else {
+                    return "Window must be at least the \(Self.formatDuration(trigger.horizon)) forecast horizon"
+                }
+            }
+            if let nagInterval, nagInterval < Self.minInterval {
+                return "Remind interval must be at least 1 min"
+            }
+            if let repeatInterval, repeatInterval < Self.minInterval {
+                return "Repeat interval must be at least 1 min"
+            }
+            return nil
+        }
+
+        /// Non-blocking problems: the watch accepts these happily, but the
+        /// alert may not do what the user expects.
+        func warnings(forecaster: Forecaster) -> [String] {
+            var out: [String] = []
+            if trigger.isForecast && forecaster == .none {
+                out.append("This preset has no forecaster, so a forecast alert never fires. Set one on the General tab.")
+            }
+            if ackRequired && !screenOn && nagInterval == nil {
+                out.append("Acknowledgment is required, but the screen stays off and there is no reminder — this alert can go completely unnoticed.")
+            }
+            if pattern == nil && !screenOn {
+                out.append("Silent with the screen off — this alert only ever shows on the watch's Alerts face.")
+            }
+            return out
+        }
+
+        /// e.g. "Below 70 mg/dL", "Average above 250 mg/dL over 2 h"
+        var summary: String {
+            switch trigger {
+            case .outdated: return "Reading older than the preset's outdated threshold"
+            case .noData:   return "No reading for the preset's no-data threshold"
+            case .datapoint, .forecast15, .forecast30:
+                guard let condition, let value else { return "Incomplete alert" }
+                var text = "\(condition.label) \(value) mg/dL"
+                if let window {
+                    text += " over \(Self.formatDuration(window))"
+                } else if condition.isWindowed {
+                    text += " across the forecast"
+                }
+                return text
+            }
+        }
+
+        /// e.g. "15-min forecast · Sos · Screen on · Ack · Repeat 30 min"
+        var detail: String {
+            var bits: [String] = [trigger.label, pattern.map(Self.formatPattern) ?? "Silent"]
+            if screenOn { bits.append("Screen on") }
+            if ackRequired { bits.append("Ack") }
+            if let nagInterval { bits.append("Remind \(Self.formatDuration(nagInterval))") }
+            if let repeatInterval { bits.append("Repeat \(Self.formatDuration(repeatInterval))") }
+            if priority != 0 { bits.append("P\(priority)") }
+            return bits.joined(separator: " · ")
+        }
+
+        /// Describe what a window actually covers, splitting the total span
+        /// into its history and forecast parts.
+        static func windowBreakdown(window: Int, trigger: AlertTrigger) -> String {
+            let horizon = trigger.horizon
+            if horizon == 0 {
+                return "the last \(formatDuration(window)) of readings"
+            }
+            if window <= horizon {
+                return "all the \(formatDuration(horizon)) forecast"
+            }
+            return "\(formatDuration(window - horizon)) of readings plus all the \(formatDuration(horizon)) forecast"
+        }
+
+        static func formatPattern(_ pat: String) -> String {
+            pat.split(separator: "_").map { $0.capitalized }.joined(separator: " ")
+        }
+
+        static func formatDuration(_ seconds: Int) -> String {
+            let minutes = seconds / 60
+            guard minutes >= 60 else { return "\(minutes) min" }
+            let hours = minutes / 60
+            let rest = minutes % 60
+            return rest == 0 ? "\(hours) h" : "\(hours) h \(rest) min"
+        }
     }
 
     // MARK: - Preset model
@@ -194,6 +456,11 @@ final class GlyWatchManager: NSObject, ObservableObject {
     @Published var bleResponse: String = ""
     @Published var pendingReadingsCount: Int = 0
     @Published var commandLog: [CommandLogEntry] = []
+    /// Progress of a running `resendAlerts` run. `alertResendTotal == 0`
+    /// means no re-send is in flight. Each alert is its own BLE connect,
+    /// so a run of any size takes long enough to be worth showing.
+    @Published var alertResendSent: Int = 0
+    @Published var alertResendTotal: Int = 0
     @Published var transmissionsEnabled: Bool = UserDefaults.standard.glyWatchTransmissionsEnabled {
         didSet {
             UserDefaults.standard.glyWatchTransmissionsEnabled = transmissionsEnabled
@@ -466,10 +733,40 @@ final class GlyWatchManager: NSObject, ObservableObject {
         }
     }
 
+    /// Build the `s_a` line for one alert.
+    ///
+    /// Keys the firmware treats as FORBIDDEN for a given trigger/condition
+    /// are omitted outright rather than sent as null — an omitted optional
+    /// key and an explicit null mean the same thing to the watch, and
+    /// omitting keeps the line comfortably inside the ~256-byte REPL buffer.
+    private static func alertMessage(presetIndex: Int, alert: HapticAlert) -> String {
+        var fields: [String] = [
+            "\"app\":\"gly\"",
+            "\"t\":\"s_a\"",
+            "\"p\":\(presetIndex)",
+            "\"id\":\"\(alert.id)\"",
+            "\"tr\":\"\(alert.trigger.rawValue)\"",
+        ]
+        if let condition = alert.condition { fields.append("\"c\":\"\(condition.rawValue)\"") }
+        if let window = alert.window       { fields.append("\"w\":\(window)") }
+        if let value = alert.value         { fields.append("\"v\":\(value)") }
+        fields.append("\"so\":\(alert.screenOn ? 1 : 0)")
+        fields.append("\"pat\":\(alert.pattern.map { "\"\($0)\"" } ?? "null")")
+        fields.append("\"ack\":\(alert.ackRequired ? 1 : 0)")
+        fields.append("\"ins\":\(alert.nagInterval.map(String.init) ?? "null")")
+        fields.append("\"rp\":\(alert.repeatInterval.map(String.init) ?? "null")")
+        fields.append("\"pr\":\(alert.priority)")
+        return "GB({" + fields.joined(separator: ",") + "})\r\n"
+    }
+
+    /// The watch evaluates each line in a ~256-byte REPL buffer; anything
+    /// longer is truncated into a syntax error rather than rejected cleanly.
+    private static let maxCommandBytes = 250
+
     /// Save (or disable) a single alert.
     ///
     /// Wire behaviour:
-    /// - `alert.enabled == true`  → send `s_a` with op/thr/pat
+    /// - `alert.enabled == true`  → send `s_a` with the full field set
     /// - `alert.enabled == false` → send `d_a` (the watch forgets it)
     /// - Special case: if the alert is **new** AND already disabled at save
     ///   time, BLE is skipped entirely — `d_a` for an id the watch has never
@@ -479,17 +776,39 @@ final class GlyWatchManager: NSObject, ObservableObject {
     /// Local behaviour:
     /// - On BLE success → upsert with the alert exactly as supplied.
     /// - On BLE failure → upsert with `enabled` forced to `false`. The user's
-    ///   field values (op/thr/pat) are still persisted, so they can retry
-    ///   without re-entering them, and the alert state correctly reflects
-    ///   that the watch does NOT have it active.
+    ///   field values are still persisted, so they can retry without
+    ///   re-entering them, and the alert state correctly reflects that the
+    ///   watch does NOT have it active.
     /// - Removal from the phone-side list only happens via `deleteAlert`.
-    func saveAlert(at presetIndex: Int, alert: HapticAlert, onResult: ((Bool, String?) -> Void)? = nil) {
+    ///
+    /// `isNew` cannot be inferred from the id: an edit keeps its id (the id
+    /// is immutable once saved, since renaming would orphan the watch-side
+    /// file), so "id already in the list" means *update* for an edit and
+    /// *collision* for a new alert.
+    func saveAlert(at presetIndex: Int, alert: HapticAlert, isNew: Bool, onResult: ((Bool, String?) -> Void)? = nil) {
         guard !isSending, presetIndex < presets.count else {
             onResult?(false, "Busy or invalid preset")
             return
         }
 
-        let existsLocally = presets[presetIndex].hapticAlerts.contains(where: { $0.id == alert.id })
+        // Validate before touching BLE: the watch rejects a bad payload with
+        // nothing but a log line, so a round-trip would tell the user less
+        // than we already know here.
+        if let problem = alert.validationError {
+            log.error("Refusing to send GlyWatch alert %{public}@: %{public}@", alert.id, problem)
+            onResult?(false, problem)
+            return
+        }
+
+        let existsLocally = presets[presetIndex].hapticAlerts.contains { $0.id == alert.id }
+        if isNew && existsLocally {
+            // The watch overwrites blindly on a repeated id and never reports
+            // a collision, so an unchecked duplicate would silently clobber
+            // the other alert on the device.
+            onResult?(false, "An alert with ID \u{201C}\(alert.id)\u{201D} already exists in this preset")
+            return
+        }
+
         if !alert.enabled && !existsLocally {
             // New + disabled: nothing to push to the watch, just store locally.
             log.default("GlyWatch alert id=%{public}@ created locally, disabled — skipping BLE", alert.id)
@@ -501,18 +820,24 @@ final class GlyWatchManager: NSObject, ObservableObject {
 
         let message: String
         if alert.enabled {
-            message = "GB({\"app\":\"gly\",\"t\":\"s_a\",\"p\":\(presetIndex),\"id\":\"\(alert.id)\",\"op\":\"\(alert.op)\",\"thr\":\(alert.thr),\"pat\":\"\(alert.pat)\"})\r\n"
+            message = Self.alertMessage(presetIndex: presetIndex, alert: alert)
             log.default("Saving GlyWatch alert id=%{public}@ in preset %{public}d", alert.id, presetIndex)
         } else {
             message = "GB({\"app\":\"gly\",\"t\":\"d_a\",\"p\":\(presetIndex),\"id\":\"\(alert.id)\"})\r\n"
             log.default("Disabling GlyWatch alert id=%{public}@ in preset %{public}d (sending d_a, keeping locally)", alert.id, presetIndex)
         }
+
+        guard message.utf8.count <= Self.maxCommandBytes else {
+            onResult?(false, "Alert is too long for the watch (\(message.utf8.count) bytes)")
+            return
+        }
+
         beginTransmission(message, isUserTriggered: true) { [weak self] in
             guard let self else { return }
             self.evaluateResult(rejectMessage: "Watch rejected alert")
             // Upsert in both success and failure cases. On failure force
             // enabled=false so local state reflects "watch does NOT have it
-            // active right now" — user keeps their op/thr/pat and can retry.
+            // active right now" — the user keeps their settings and can retry.
             var stored = alert
             if self.lastPushError != nil { stored.enabled = false }
             if let i = self.presets[presetIndex].hapticAlerts.firstIndex(where: { $0.id == alert.id }) {
@@ -553,9 +878,65 @@ final class GlyWatchManager: NSObject, ObservableObject {
         }
     }
 
+    /// Re-push every enabled alert in the preset, one command per connection,
+    /// stopping at the first failure.
+    ///
+    /// There is no list-alerts command and the watch drops alert files it
+    /// cannot parse (a firmware update did exactly that to every alert stored
+    /// under an older schema), so the phone is the only source of truth for
+    /// what should exist on the device. This is how the two are reconciled.
+    func resendAlerts(at presetIndex: Int, onResult: ((Bool, String?) -> Void)? = nil) {
+        guard !isSending, presetIndex < presets.count else {
+            onResult?(false, "Busy or invalid preset")
+            return
+        }
+        let pending = presets[presetIndex].hapticAlerts.filter { $0.enabled }
+        guard !pending.isEmpty else {
+            onResult?(false, "No enabled alerts to send")
+            return
+        }
+        log.default("Re-sending %{public}d GlyWatch alerts in preset %{public}d", pending.count, presetIndex)
+        alertResendSent = 0
+        alertResendTotal = pending.count
+        sendAlertChain(presetIndex: presetIndex, remaining: pending, sent: 0, total: pending.count, onResult: onResult)
+    }
+
+    private func sendAlertChain(presetIndex: Int, remaining: [HapticAlert], sent: Int, total: Int, onResult: ((Bool, String?) -> Void)?) {
+        guard let alert = remaining.first else {
+            log.default("GlyWatch re-send complete (%{public}d alerts)", sent)
+            alertResendTotal = 0
+            onResult?(true, nil)
+            return
+        }
+        let rest = Array(remaining.dropFirst())
+
+        // Skip rather than abort: one unsendable alert should not block the
+        // rest of the preset from being restored on the watch.
+        if let problem = alert.validationError {
+            log.error("Skipping GlyWatch alert %{public}@ during re-send: %{public}@", alert.id, problem)
+            sendAlertChain(presetIndex: presetIndex, remaining: rest, sent: sent, total: total, onResult: onResult)
+            return
+        }
+
+        beginTransmission(Self.alertMessage(presetIndex: presetIndex, alert: alert), isUserTriggered: true) { [weak self] in
+            guard let self else { return }
+            self.evaluateResult(rejectMessage: "Watch rejected alert \(alert.id)")
+            if self.lastPushError == nil {
+                self.alertResendSent = sent + 1
+                self.sendAlertChain(presetIndex: presetIndex, remaining: rest, sent: sent + 1, total: total, onResult: onResult)
+            } else {
+                self.alertResendTotal = 0
+                onResult?(false, "Stopped at \(alert.id) after \(sent)/\(total): \(self.lastPushError ?? "failed")")
+            }
+        }
+    }
+
     /// Generate a 3-char lowercase alphanumeric id that does not collide with
-    /// any existing alert in the preset. 36³ = 46,656 namespace — practically
+    /// any existing alert in the preset. 36^3 = 46,656 namespace — practically
     /// no contention even at hundreds of alerts.
+    ///
+    /// The watch never generates ids and never detects collisions, so
+    /// uniqueness is entirely the companion's job.
     func generateUniqueAlertId(forPresetAt index: Int) -> String {
         guard index < presets.count else { return Self.randomAlertId() }
         let existing = Set(presets[index].hapticAlerts.map { $0.id })

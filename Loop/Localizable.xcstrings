@@ -718,16 +718,6 @@
         }
       }
     },
-    "%@ %lld mg/dL" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$@ %2$lld mg/dL"
-          }
-        }
-      }
-    },
     "%@ absorbed" : {
       "comment" : "Formats absorbed carb value",
       "localizations" : {
@@ -3187,6 +3177,16 @@
         }
       }
     },
+    "%lld/%lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld/%2$lld"
+          }
+        }
+      }
+    },
     "⚠️" : {
       "localizations" : {
         "da" : {
@@ -4257,9 +4257,6 @@
         }
       }
     },
-    "Above" : {
-
-    },
     "Absorption Time" : {
       "comment" : "Label for food absorption entry on add favorite food screen",
       "localizations" : {
@@ -4432,6 +4429,9 @@
           }
         }
       }
+    },
+    "Actions" : {
+
     },
     "Active Carbohydrates" : {
       "comment" : "The title of the Carbs On-Board graph",
@@ -6128,6 +6128,9 @@
         }
       }
     },
+    "Alerts are edge-triggered: one fire when the condition starts matching, then latched until it stops. Repeat fires again while it still holds; reminding repeats the actions until acknowledged." : {
+
+    },
     "Algorithm Experiments" : {
       "comment" : "Navigation title for algorithms experiments screen\nThe title of the Algorithm Experiments section in settings",
       "localizations" : {
@@ -6512,6 +6515,9 @@
           }
         }
       }
+    },
+    "Already used in this preset" : {
+
     },
     "Amount Consumed" : {
       "comment" : "Label for carb quantity entry row on carb entry screen",
@@ -8907,9 +8913,6 @@
           }
         }
       }
-    },
-    "Below" : {
-
     },
     "Bluetooth\nOff" : {
       "comment" : "Message to the user to that the bluetooth is off",
@@ -16238,9 +16241,6 @@
         }
       }
     },
-    "Direction" : {
-
-    },
     "Disabled" : {
 
     },
@@ -18065,6 +18065,9 @@
         }
       }
     },
+    "Escalation" : {
+
+    },
     "Event History" : {
       "comment" : "Segmented button title for insulin delivery log event history",
       "localizations" : {
@@ -18296,6 +18299,9 @@
           }
         }
       }
+    },
+    "Every %@" : {
+
     },
     "Exceeds maximum allowed bolus in settings" : {
       "comment" : "Bolus error description: bolus exceeds maximum bolus in settings.",
@@ -19154,6 +19160,9 @@
           }
         }
       }
+    },
+    "Firing" : {
+
     },
     "Fix now by turning Notifications, Critical Alerts and Time Sensitive Notifications ON." : {
       "comment" : "Secondary text for alerts disabled warning, which appears on the main status screen.",
@@ -24043,6 +24052,9 @@
           }
         }
       }
+    },
+    "lo1" : {
+
     },
     "Loading..." : {
       "comment" : "The loading message for the diagnostic report screen",
@@ -30427,6 +30439,9 @@
     "Presets" : {
 
     },
+    "Priority: %lld" : {
+
+    },
     "Profile Expiration" : {
       "comment" : "Settings App Profile expiration view",
       "localizations" : {
@@ -32250,6 +32265,9 @@
         }
       }
     },
+    "Re-send all to watch" : {
+
+    },
     "Recommendation expired: %1$@ old" : {
       "comment" : "The error message when a recommendation has expired. (1: age of recommendation in minutes)",
       "localizations" : {
@@ -32805,6 +32823,9 @@
         }
       }
     },
+    "Remind until acknowledged" : {
+
+    },
     "Remote Bolus Entry: %@ U" : {
       "comment" : "The notification title for a remote bolus. (1: Bolus amount)\nThe notification title for a remote failure. (1: Bolus amount)",
       "localizations" : {
@@ -32964,6 +32985,12 @@
           }
         }
       }
+    },
+    "Repeat while condition holds" : {
+
+    },
+    "Require acknowledgment" : {
+
     },
     "Reservoir" : {
       "comment" : "Segmented button title for insulin delivery log reservoir history",
@@ -34292,6 +34319,9 @@
           }
         }
       }
+    },
+    "Silent" : {
+
     },
     "Simple Bolus Calculator" : {
       "comment" : "Title of simple bolus view when not displaying meal entry",
@@ -36576,6 +36606,9 @@
         }
       }
     },
+    "The ID is fixed once saved. Delete and re-add to change it." : {
+
+    },
     "The legacy model used by Loop, allowing customization of action duration." : {
       "comment" : "Subtitle description of Walsh insulin model setting",
       "extractionState" : "manual",
@@ -37187,6 +37220,9 @@
     "The preset \"%@\" has unsaved changes. Discard them?" : {
 
     },
+    "The screen and the haptic are independent: haptic-only keeps the alert dark, screen-only makes it silent." : {
+
+    },
     "Therapy Settings" : {
       "comment" : "Title text for button to Therapy Settings",
       "localizations" : {
@@ -37341,7 +37377,7 @@
         }
       }
     },
-    "Threshold: %lld mg/dL" : {
+    "Three letters or digits, generated at random and unique within the preset. Shown on the watch's Alerts face and on the acknowledgment screen, so you can overwrite it with something you will recognise. Cannot be changed after saving." : {
 
     },
     "Time Sensitive Alerts" : {
@@ -37530,6 +37566,9 @@
           }
         }
       }
+    },
+    "Trigger" : {
+
     },
     "Try Again" : {
       "comment" : "Critical event log export error alert try again button",
@@ -37767,6 +37806,9 @@
           }
         }
       }
+    },
+    "Turn screen on" : {
+
     },
     "U" : {
       "comment" : "The short unit display string for international units of insulin",
@@ -39705,6 +39747,9 @@
         }
       }
     },
+    "Value: %lld mg/dL" : {
+
+    },
     "Walsh" : {
       "comment" : "Title of insulin model setting",
       "extractionState" : "manual",
@@ -40345,6 +40390,9 @@
           }
         }
       }
+    },
+    "When several alerts match at once, the highest priority fires." : {
+
     },
     "While mute alerts is on, all alerts from your %1$@ app including Critical and Time Sensitive alerts will temporarily display without sounds and will vibrate only." : {
       "comment" : "App sounds descriptive text (1: app name)",
