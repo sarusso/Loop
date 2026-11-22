@@ -1588,6 +1588,10 @@ extension GlyWatchManager: CBPeripheralDelegate {
             log.error("GlyWatch chunk write failed: %{public}@", error.localizedDescription)
             // Continue anyway — failures here are surfaced by the send timeout / response handling
         }
+        // The probe's \r and the Ctrl-C break are .withResponse writes too, so
+        // their ACKs land here. Payload chunks must not start on those: the
+        // first chunk is written from didUpdateValueFor once >>> is seen.
+        guard !waitingForPrompt else { return }
         writeNextChunk()
     }
 
