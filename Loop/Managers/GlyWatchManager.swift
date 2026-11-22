@@ -498,6 +498,10 @@ final class GlyWatchManager: NSObject, ObservableObject {
     private static let promptTimeout: TimeInterval = 5
     private var pendingCommandEcho: String?   // command text the REPL will echo back (no \r\n)
     private var echoDetected = false          // true once pendingCommandEcho seen in TX stream
+    /// UTF-8 length of `bleResponse` up to the end of the command's echo.
+    /// Everything past it is the watch's own output. A length rather than a
+    /// String.Index, because `bleResponse` keeps growing after it is set.
+    private var echoEndOffset: Int?
     private var chunkIndex: Int = 0           // 0-based index of next chunk to write
     private var chunkTotal: Int = 0           // total chunks in current transmission
 
@@ -578,11 +582,33 @@ final class GlyWatchManager: NSObject, ObservableObject {
             lastPushError = "No response from watch"
         } else if echoDetected && replPromptCount == 0 {
             lastPushError = "Watch did not complete execution"
-        } else if bleResponse.range(of: "error", options: .caseInsensitive) != nil {
+        } else if watchReportedError {
             lastPushError = rejectMessage
         } else {
             lastPushError = nil
         }
+    }
+
+    /// What the watch printed after echoing the command. The echo itself is
+    /// left out so the command's own text (a preset named "Terror", say)
+    /// cannot be mistaken for a failure. With no echo found there is nothing
+    /// to skip, and the whole response is searched.
+    private var watchOutput: Substring {
+        guard let offset = echoEndOffset else { return bleResponse[...] }
+        let utf8 = bleResponse.utf8
+        guard let start = utf8.index(utf8.startIndex, offsetBy: offset, limitedBy: utf8.endIndex) else {
+            return bleResponse[...]
+        }
+        return bleResponse[start...]
+    }
+
+    /// "error" in any case covers the firmware's `[ERROR]` log lines and raw
+    /// MicroPython exceptions (`SyntaxError:`, `MemoryError:`, ...);
+    /// "Traceback" covers exceptions whose names do not contain "Error".
+    private var watchReportedError: Bool {
+        let output = watchOutput
+        return output.range(of: "error", options: .caseInsensitive) != nil
+            || output.contains("Traceback")
     }
 
     // MARK: - Push (glucose reading)
@@ -1130,6 +1156,7 @@ final class GlyWatchManager: NSObject, ObservableObject {
 
         pendingCommandEcho = message.trimmingCharacters(in: .whitespacesAndNewlines)
         echoDetected = false
+        echoEndOffset = nil
         pendingChunks = stride(from: 0, to: msgData.count, by: 20).map {
             Data(msgData[$0 ..< min($0 + 20, msgData.count)])
         }
@@ -1688,6 +1715,7 @@ extension GlyWatchManager: CBPeripheralDelegate {
                 justDetectedEcho = true
                 // Count >>> only in the portion of bleResponse that follows the echo
                 if let echoRange = bleResponse.range(of: echo) {
+                    echoEndOffset = bleResponse[..<echoRange.upperBound].utf8.count
                     let afterEcho = String(bleResponse[echoRange.upperBound...])
                     replPromptCount += afterEcho.components(separatedBy: ">>>").count - 1
                 }
