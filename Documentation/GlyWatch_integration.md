@@ -7,7 +7,7 @@ Pushes CGM glucose readings from Loop to a PineTime watch running [GlyWatch](htt
 Every time Loop's glucose store updates, Loop drains **every unsent sample** since the last successful push to the paired watch, in chronological order:
 
 ```
-GB({"app":"gly","t":"r","v":156,"tr":"u","ts":1712345678})\r\n
+GB({"app":"gly","t":"r","v":156,"tr":"u","ts":1712345678,"bf":false})\r\n
 ```
 
 Each message is split into 20-byte chunks and written to the NUS RX characteristic using write-with-response (ATT acknowledged writes). After all chunks are sent, Loop waits for the watch to echo the command, return `reading received`, and re-emit a `>>>` prompt, then disconnects. Only after the watch confirms receipt is the per-sample watermark advanced and persisted.
@@ -22,6 +22,7 @@ Reading transmission uses a **watermark-and-drain** model:
 - Whenever LoopKit posts `LoopDataUpdated` with `.glucose` context, `GlyWatchManager.drainReadings()` queries `glucoseStore` for every sample with `startDate > max(lastSentTs, now − maxBackfillInterval)`, sorted ascending, and sends them one at a time over BLE.
 - `lastSentTs` advances **only on confirmed success**. On any send failure, the drain stops; the next `LoopDataUpdated.glucose` notification re-queries from the un-advanced watermark and naturally retries.
 - A re-entry guard (`isDrainingReadings`) prevents concurrent drains when notifications fire while one is already in progress.
+- Every sample of a drain except the last is sent as a **backfill** (`"bf":true`): the watch stores it without evaluating alerts, playing haptics or waking the display. Only the newest reading is sent with `"bf":false` and behaves as a live reading.
 - `GlyWatchManager.maxBackfillInterval` (default `2 * 60 * 60` = 2 hours) caps how far back the watermark can effectively reach — after long offline periods (sleep, app crash, prolonged BLE outage) the older samples beyond the cap are silently skipped to avoid flooding the watch with stale data.
 
 ### Why this design
@@ -40,7 +41,7 @@ The notification we hook into (`LoopDataUpdated.glucose`) is fired by LoopKit wh
 | App crash mid-drain | On relaunch, persisted `lastSentTs` reflects the last *confirmed* send. Next CGM reading drains the rest. |
 | Concurrent notification while draining | Re-entry guard skips it. The currently-running drain picks up newer samples on its next iteration. |
 | Out-of-order: `glucoseStore.latestGlucose` momentarily resolves to an older sample | Query still returns nothing greater than `lastSentTs`. No backwards send. |
-| Test push (debug "Push test" button) | Bypasses drain and watermark; sends a synthetic reading at `Date()`. Watch silently dedups if `ts` is older than its own last received. Does **not** advance `lastSentTs`. |
+| Test push (debug "Send test reading" button) | Bypasses drain and watermark; sends a synthetic reading at `Date()`. Watch silently dedups if `ts` is older than its own last received. Does **not** advance `lastSentTs`. |
 
 ## Pairing
 
@@ -66,8 +67,9 @@ The GlyWatch settings screen is divided into four sections:
 | **Scan for device** | Starts a 10-second scan of all nearby BLE devices |
 | **Set time** | Sends the phone's current wall-clock time and UTC offset to the watch via `s_t` |
 | **Push readings** | Toggle — when ON, glucose readings are automatically pushed to the watch. Persists across app restarts |
-| Last push | Shows the most recent pushed value and time (e.g., "156 mg/dL at 14:23:07") |
+| Last push | Shows the most recent pushed reading: its own time, its value, and when it was sent (e.g., "14:23:07: 156 mg/dL (sent 14:23:12)") |
 | No readings pushed yet | Shown when no push has occurred this session |
+| Pending readings | Number of readings in the last 2 hours that the watch has not confirmed yet |
 | Status | Permanent row showing the BLE pipeline state (see [Transmission status lifecycle](#transmission-status-lifecycle)) |
 
 ### Presets section
@@ -82,7 +84,9 @@ The GlyWatch settings screen is divided into four sections:
 | **General / Ranges / Alerts** | Segmented tab picker for the three configuration tabs |
 | **Save** | Saves the current tab's settings to the watch via BLE. Only persists to UserDefaults after BLE confirmation succeeds |
 
-**General tab:** Name, Display brightness (Low/Mid/High), Display always on, Display sleep (hidden when always on), Display wakes on new readings (hidden when always on), Single/Double/Long tap actions, Short/Long button press actions, Forecaster, Outdated data, No data.
+**General tab:** Name (at most 16 characters), Display brightness (Low/Mid/High), Display always on, Display sleep (hidden when always on), Display wakes on new readings (hidden when always on), Single/Double/Long tap actions, Short/Long button press actions, Forecaster, Outdated data, No data.
+
+The tap and button actions are Nothing, Wake/Sleep and Haptics. On the watch, "Nothing" on a single or double tap is not a no-op: it switches between the number view and the graph view. It does nothing only on a long tap and on the two button presses.
 
 **Ranges tab:** 5 glucose ranges (Very Low / Low / OK / High / Very High) separated by 4 cutoff steppers. Each range has a haptic pattern picker and a "Play on new readings" toggle.
 
@@ -113,54 +117,64 @@ Pattern picker + **Play** button — sends a MicroPython command to play the sel
 | Element | What it does |
 |---|---|
 | Test value stepper + **Send test reading** | Pushes a reading with the chosen mg/dL value and flat trend |
-| **Get battery / Get free mem / Get free mem blocks / Get uptime** | Sends MicroPython one-liners to query watch state |
+| **Drain pending readings** | Runs the reading drain now instead of waiting for the next CGM reading |
+| **Reset readings watermark** | Sets `lastSentTs` back to 0, so the next drain re-sends the last 2 hours (the watch ignores what it already has) |
+| **Get battery / Get uptime / Get mem free / Get mem layout** | Sends MicroPython one-liners to query watch state |
 | **Send Ctrl-C** | Sends `\x03` to interrupt any running command on the watch |
-| Custom command + **Send** | Free-form MicroPython command entry |
+| Custom command + **Send** | Free-form MicroPython command entry, at most 250 bytes |
 | **Start / Stop log stream** | Opens a listen-only BLE connection — no probe, no payload, just streams everything the watch sends into the response area |
 | Last transmission response | Scrollable text area showing raw NUS TX data from the most recent session, with timestamp (e.g., "@ 14:23 16/4/2026") |
+| **Open command log** | In-memory list of every command sent since the app started (newest first, up to 1000), with its status and the watch's raw reply. Not persisted |
 
 ## Wire protocol
 
 All messages use the `GB({...})\r\n` envelope. The `app` key is always `"gly"`.
 
+The watch's REPL evaluates each line in a ~256-byte buffer, and a longer line is truncated into a syntax error. Loop refuses to send any command over 250 bytes and reports "Command is too long for the watch".
+
 ### Reading push (`t: "r"`)
 
 ```json
-{"app":"gly","t":"r","v":156,"tr":"u","ts":1712345678}
+{"app":"gly","t":"r","v":156,"tr":"u","ts":1712345678,"bf":false}
 ```
 
 | Key | Type | Meaning |
 |---|---|---|
 | `v` | int | Glucose value in mg/dL |
-| `tr` | string | Trend code (see [Trend codes](#trend-codes)) |
+| `tr` | string | Trend code (see [Trend codes](#trend-codes)). The current firmware ignores it and computes the trend from its own readings |
 | `ts` | int | Unix timestamp (seconds since epoch) |
+| `bf` | bool | Backfill: `true` = store the reading without alerts, haptics or display wake. Loop sets it on every reading of a drain except the last |
+
+The firmware also accepts an external forecast (`f`) and active insulin (`iob`) on this command. Loop does not send them yet.
 
 ### Save general config (`t: "s_c"`)
 
 ```json
-{"app":"gly","t":"s_c","p":0,"n":"default","rw":0,"db":2,"ds":10,"fc":"Trend","od":10,"nd":30,"st":0,"dt":1,"lt":0,"sp":1,"lp":2}
+{"app":"gly","t":"s_c","p":0,"n":"Default","rw":0,"db":2,"ds":10,"fc":"Trend","od":10,"nd":30,"st":0,"dt":1,"lt":0,"sp":1,"lp":2}
 ```
 
 | Key | Type | Meaning |
 |---|---|---|
 | `p` | int | Preset index |
-| `n` | string | Preset name |
+| `n` | string | Preset name, at most 16 characters. `"` and `\` are backslash-escaped and control characters are dropped |
 | `rw` | 0/1 | Wake display on new readings |
 | `db` | 1-3 | Display brightness (1=Low, 2=Mid, 3=High) |
 | `ds` | int or null | Display sleep in seconds; null = always on |
-| `fc` | string or null | Forecaster name ("Trend"); null = none |
+| `fc` | string or null | Forecaster name ("Trend"); null = none. The firmware also accepts "External", which Loop does not offer yet |
 | `od` | int | Outdated data threshold in minutes |
 | `nd` | int | No data threshold in minutes |
-| `st` | 0-2 | Single tap action (0=nothing, 1=wake/sleep, 2=haptics) |
-| `dt` | 0-2 | Double tap action |
-| `lt` | 0-2 | Long tap action |
-| `sp` | 0-2 | Short button press action |
-| `lp` | 0-2 | Long button press action |
+| `st` | 0-2 | Single tap action (0=switch number/graph view, 1=wake/sleep, 2=haptics) |
+| `dt` | 0-2 | Double tap action, same codes |
+| `lt` | 0-2 | Long tap action (0=nothing, 1=wake/sleep, 2=haptics) |
+| `sp` | 0-2 | Short button press action, same codes as long tap |
+| `lp` | 0-2 | Long button press action, same codes as long tap |
+
+The firmware also accepts a fast wake flag (`fw`). Loop does not send it, so the watch uses its default (0).
 
 ### Save ranges (`t: "s_r"`)
 
 ```json
-{"app":"gly","t":"s_r","p":0,"rc":[70,100,200,300],"rh":["single_buzz","notification","notification_single","stutter","stutter_long"],"ph":[1,1,0,0,0]}
+{"app":"gly","t":"s_r","p":0,"rc":[70,100,200,300],"rh":["single_buzz","notification","notification_single","stutter_short","stutter"],"ph":[1,1,0,0,0]}
 ```
 
 | Key | Type | Meaning |
@@ -183,7 +197,7 @@ All messages use the `GB({...})\r\n` envelope. The `app` key is always `"gly"`.
 | `id` | string | Alert id — exactly 3 alphanumeric characters, unique within the preset. Companion-owned and companion-generated |
 | `tr` | string | Trigger: `dp` new datapoint, `f15`/`f30` forecast at that horizon, `od` outdated data, `nd` no data |
 | `c` | string | Condition: `gt`, `lt`, `avg_gt`, `avg_lt`, `all_gt`, `all_lt`, `any_gt`, `any_lt` |
-| `w` | int | Window in seconds, 300–7200, meaningful in 300 s steps. The **total span** of the window, ending at the trigger's forecast horizon — not an amount of history |
+| `w` | int | Window in seconds, 300–7200, meaningful in 300 s steps. The **total span** of the window, ending at the trigger's forecast horizon — not an amount of history. Required for `avg`/`all`/`any` on every trigger, omitted otherwise |
 | `v` | int | Threshold in mg/dL |
 | `so` | 0/1 | Turn the screen on when firing |
 | `pat` | string or null | Haptic pattern name; `null` = silent. Unknown names are stored but fire nothing |
@@ -194,7 +208,7 @@ All messages use the `GB({...})\r\n` envelope. The `app` key is always `"gly"`.
 
 `d_a` carries only `p` and `id`.
 
-Keys the matrix marks FORBIDDEN for a given trigger/condition pair are **omitted** rather than sent as `null` — the watch treats an omitted optional key and an explicit `null` identically, and omitting keeps the line inside the watch's ~256-byte REPL buffer. Loop refuses to send any line over 250 bytes rather than let it be truncated into a syntax error.
+Keys the matrix marks FORBIDDEN for a given trigger/condition pair are **omitted** rather than sent as `null` — the watch treats an omitted optional key and an explicit `null` identically, and omitting keeps the line short.
 
 #### Applicability matrix
 
@@ -205,8 +219,10 @@ Loop enforces this before touching BLE. The watch rejects a violation with nothi
 | `dp` + `gt`/`lt` | required | forbidden | required |
 | `dp` + `avg`/`all`/`any` | required | **required** | required |
 | `f15`/`f30` + `gt`/`lt` | required | forbidden | required |
-| `f15`/`f30` + `avg`/`all`/`any` | required | optional (omitted = the forecast points alone) | required |
+| `f15`/`f30` + `avg`/`all`/`any` | required | **required**, at least the horizon | required |
 | `od`, `nd` | forbidden | forbidden | forbidden |
+
+One cell is not yet enforced by Loop's own validation: it still lets a missing window through for `avg`/`all`/`any` on a forecast trigger, which the watch rejects. The editor always sets a window there, so this cannot be produced from the UI.
 
 #### What the conditions mean
 
@@ -218,7 +234,7 @@ The trigger picks the data, the condition tests it:
 
 `gt`/`lt` test the anchor point alone and forbid `w` — for a forecast trigger the anchor is the forecast value at +15/+30 min.
 
-`avg`/`all`/`any` test a window. `w` is required on `dp` — there is nothing else to bound the reading series — and optional on a forecast trigger, where omitting it means the forecast points alone. The window is a *total span* ending at the trigger's horizon, not an amount of history: it always holds `w // 300` points, and the forecast occupies the last `horizon // 300` of them.
+`avg`/`all`/`any` test a window, and `w` is required on every trigger. The window is a *total span* ending at the trigger's horizon, not an amount of history: it always holds `w // 300` points, and the forecast occupies the last `horizon // 300` of them.
 
 ```
 horizon  =  0 (dp) | 900 (f15) | 1800 (f30)     seconds past "now"
@@ -228,7 +244,7 @@ points   =  w // 300
 
 So a 1 h window on `f15` is 45 min of readings plus the 15 min forecast (12 points); the same 1 h on `dp` is a plain hour of readings (12 points). Setting `w` equal to the horizon gives the forecast alone — `w=1800` on `f30` is the six forecast points and no history.
 
-That last case selects the same points as omitting `w` entirely. Loop always sends an explicit `w` rather than relying on the optional form, so the window stepper reads:
+The window stepper therefore reads:
 
 ```
 f15:   15 min → 20 min → 25 min → … → 2 h     (default 15 min)
@@ -249,7 +265,7 @@ Missing datapoints are skipped, and at least one usable point is required for a 
 | 15-min forecast below 80 | `f15` | `lt` | — | 80 |
 | Last hour + 30-min forecast above 200 | `f30` | `all_gt` | 5400 | 200 |
 | 2-hour average above 250 | `dp` | `avg_gt` | 7200 | 250 |
-| Any forecast point below 80 | `f30` | `any_lt` | 1800 (or omitted) | 80 |
+| Any forecast point below 80 | `f30` | `any_lt` | 1800 | 80 |
 
 #### Firing behaviour
 
@@ -260,11 +276,12 @@ Missing datapoints are skipped, and at least one usable point is required for a 
 
 #### On the watch
 
-- **Alerts face** (swipe right from the dashboard): the ids of currently firing alerts, or "No alerts".
-- `ack=1` alerts present a fullscreen "!" with the id below. One tap or button press acknowledges, stopping the `ins` nagging for that episode; the alert stays listed until the episode ends. The view is dismissed by display sleep and re-presented on every wake and every nag until acked.
-- `so` and `ack` are independent: `so=0` + `ack=1` is the "dark ack" — haptics only, button press acknowledges without the screen ever lighting. Loop permits it, but warns when `ack=1` + no nag + screen off would make an alert easy to miss entirely.
+- **Alerts face** (swipe right from the dashboard, or it comes up by itself when an alert fires): the alerts currently firing, one at a time, or "No alerts". The title shows the position (`Alerts (1/2)`), the alert's description sits in the centre, and the bottom line reads `Tap to ack` while the alert awaits acknowledgment. Alerts are ordered by priority, those awaiting acknowledgment first among equals.
+- A tap moves to the next alert and, if the shown one has `ack=1` and is not yet acknowledged, acknowledges it. Tapping the last alert returns to the dashboard. Acknowledging stops the `ins` nagging for that episode; the alert stays listed until the episode ends.
+- Acknowledging is tap-only. The side button never acknowledges, and nothing can be acknowledged while the display is off. While an acknowledgment is pending, the Alerts face returns on every wake and every nag.
+- `so` and `ack` are independent: with `so=0` + `ack=1` the alert fires in the dark, with haptics only, and is waiting on screen at the next wake. Loop permits it, but warns when `ack=1` + no nag + screen off would make an alert easy to miss entirely.
 
-The id is the only thing identifying an alert on the watch. Loop generates a random 3-character lowercase alphanumeric id at "Add alert" time, checked against the preset's existing ids, and the field stays editable while the alert is new — so an alert you expect to see fired at you can be given something you will recognise.
+The watch does not display the id: it shows a description built from the alert's settings, and the id appears only in its logs. Loop generates a random 3-character lowercase alphanumeric id at "Add alert" time, checked against the preset's existing ids, and the field stays editable while the alert is new.
 
 #### Save, disable, delete
 
@@ -317,16 +334,16 @@ Duplicate ids are checked on the phone at save time for the same reason: the wat
 
 ## Preset defaults
 
-New presets are created with these defaults:
+Presets are created with these defaults. Two of them differ between the first preset (the one that exists before anything is saved) and presets added with the + button:
 
 | # | Field | Default | UI label | Wire key |
 |---|---|---|---|---|
-| 1 | `name` | `"default"` | Name | `n` |
+| 1 | `name` | `"Default"` for the first preset, `"Preset N"` for added ones | Name | `n` |
 | 2 | `wakeOnReading` | `false` | Display wakes on new readings | `rw` |
 | 3 | `displayBrightness` | `2` (Mid) | Display brightness | `db` |
 | 4 | `displayAlwaysOn` | `false` | Display always on | `ds` (null when true) |
 | 5 | `displaySleepSec` | `10` | Display sleep: 10 sec | `ds` (integer) |
-| 6 | `forecaster` | `.trend` | Forecaster: Trend | `fc` ("Trend") |
+| 6 | `forecaster` | `.none` for the first preset, `.trend` for added ones | Forecaster | `fc` (null / "Trend") |
 | 7 | `od` | `10` min | Outdated data | `od` |
 | 8 | `nd` | `30` min | No data | `nd` |
 | 9 | `st` | `.nothing` (0) | Single tap | `st` |
@@ -335,7 +352,7 @@ New presets are created with these defaults:
 | 12 | `sp` | `.wake` (1) | Short button press | `sp` |
 | 13 | `lp` | `.haptics` (2) | Long button press | `lp` |
 | 14 | `rangeCutoffs` | `[70, 100, 200, 300]` | Cutoff steppers | `rc` |
-| 15 | `rangeHaptics` | `["single_buzz", "notification", "notification_single", "stutter", "stutter_long"]` | Haptic per range | `rh` |
+| 15 | `rangeHaptics` | `["single_buzz", "notification", "notification_single", "stutter_short", "stutter"]` | Haptic per range | `rh` |
 | 16 | `rangePlayHaptic` | `[true, true, false, false, false]` | Play on new readings | `ph` |
 | 17 | `hapticAlerts` | `[]` (no alerts) | Alerts tab | `s_a` / `d_a` |
 
@@ -357,10 +374,10 @@ Loop's 7-level trend scale is mapped to compact string codes:
 
 ```
 simple_pulse, single_buzz, single_buzz_short, single_buzz_long,
-triple_tap, heartbeat, urgent, linear_ramp, short_long, long_short,
-double_tap, notification, notification_single, bounce, rbounce,
-countdown, stutter, stutter_short, stutter_long, sos, fanfare,
-uprising_sweep
+double_buzz, triple_buzz, triple_tap, heartbeat, urgent, linear_ramp,
+short_long, long_short, double_tap, notification, notification_single,
+bounce, rbounce, countdown, stutter, stutter_short, stutter_long, sos,
+fanfare, uprising_sweep
 ```
 
 ## Technical details
@@ -391,8 +408,9 @@ Every push follows this sequence:
 
 5. peripheral(_:didUpdateNotificationStateFor:)
    → probeForPrompt(): send \r to solicit >>> from the REPL
-   → on preamble retry: send \x03\x03\r instead
    → arm 5-second prompt timeout
+   → if the watch answers ... instead: send \x03\x03\r once, re-arm the timeout
+   → write ACKs for the probe and the Ctrl-C are ignored: no payload yet
 
 6. >>> detected in TX response
    → cancel prompt timeout, clear bleResponse
@@ -404,15 +422,14 @@ Every push follows this sequence:
    → arm response timer (20s initial wait for first byte)
 
 8. watch responds on TX (echo + output + >>> prompt)
-   → response timer resets on each byte (1.5s idle timeout)
+   → response timer resets on each byte (5s idle timeout)
    → >>> count accelerates disconnect (2 prompts → 0.2s, 1 → 0.5s)
 
 9. response timer fires → cancelPeripheralConnection
 
 10. centralManager(_:didDisconnectPeripheral:)
     → evaluateResult: check echo, >>>, errors
-    → drain transmissionQueue if more commands pending
-    → or enter purge cycle if no echo and purge enabled
+    → or start the next command if transmissionQueue is not empty
 ```
 
 If the REPL prompt does not arrive within 5 seconds in step 5 (e.g., watch is booting), the send is aborted with "REPL not ready" — no payload is written, preventing boot interruption.
@@ -427,7 +444,7 @@ NUS RX uses write-with-response (ATT acknowledged writes). Each chunk's link-lay
 
 ### Send timeout
 
-A 15-second watchdog timer starts when each push begins. If anything stalls — connection attempt, service discovery, TX subscription, prompt probe, or writing — the timer fires, cancels the peripheral connection, and resets all state so the next glucose reading can attempt a fresh push.
+A 15-second watchdog timer starts when each push begins and is cancelled once the last chunk has been written. If anything stalls before that — connection attempt, service discovery, TX subscription, prompt probe, or writing — the timer fires, cancels the peripheral connection, and resets all state so the next glucose reading can attempt a fresh push.
 
 ### REPL prompt probe
 
@@ -464,6 +481,7 @@ Presets are persisted to UserDefaults only after the BLE transmission succeeds. 
 
 - `Loop/Managers/GlyWatchManager.swift` — all BLE logic, push trigger, pairing, timeout, preset management
 - `Loop/Views/GlyWatchSettingsView.swift` — SwiftUI settings screen
+- `Loop/Views/GlyWatchCommandLogView.swift` — command log screen opened from the Debug section
 - `Loop/Views/SettingsView.swift` — GlyWatch status indicator in main Settings list
 - `Loop/Extensions/UserDefaults+Loop.swift` — persistence keys
 
@@ -508,7 +526,7 @@ The GlyWatch settings screen shows a permanent "Status" row that reflects the cu
 | Connecting... | ~1-3s | (unchanged, stale) |
 | Sending... | ~0.5s | (unchanged, stale) |
 | Awaiting response... | 20s | no update |
-| No echo from watch, idle | final (orange) | stale timestamp |
+| No response from watch, idle | final (orange) | stale timestamp |
 
 ### Scenario d) Cannot connect (watch off or out of range)
 
@@ -533,14 +551,27 @@ If BLE outright rejects the connection, the CoreBluetooth delegate callback `did
 
 The prompt probe sent `\r` but no `>>>` arrived within 5 seconds. No payload was written — the boot sequence was not interrupted.
 
+### Scenario f) Command never sent
+
+| Status | Duration | Last response |
+|---|---|---|
+| Connecting... | 1s | (unchanged) |
+| Command is too long for the watch (N bytes), idle | final (orange) | (unchanged) |
+
+The same path reports "No device paired" when a command is triggered with no watch paired. Nothing is written over BLE in either case.
+
 ### Error handling and result evaluation
 
 All transmission completions go through `evaluateResult(rejectMessage:)` which checks, in order:
 
 1. No response received at all → "No response from watch"
 2. Echo detected but no `>>>` prompt (REPL never returned) → "Watch did not complete execution"
-3. Response contains "error" (case-insensitive) → per-command reject message
+3. The watch's output contains "error" (case-insensitive) or "Traceback" → per-command reject message
 4. Otherwise → OK (nil error)
+
+Step 3 looks only at what the watch printed **after the echo of the command**, so the command's own text (a preset named "Terror", say) cannot be mistaken for a failure. "error" in any case covers both the firmware's `[ERROR]` log lines and raw MicroPython exceptions (`SyntaxError:`, `MemoryError:`, …); "Traceback" covers exceptions whose names do not contain "Error". If no echo was found, the whole response is searched.
+
+A response in which the echo is never found is not a failure by itself: the outcome is decided by steps 3 and 4. "No echo from watch" appears as a status only in the command log, for a command that was followed by a queued one.
 
 Glucose readings additionally verify that "reading received" appears in the response even if no error was found.
 
@@ -548,13 +579,15 @@ Glucose readings additionally verify that "reading received" appears in the resp
 |---|---|---|---|
 | 1 | Watch echoes command but crashes before processing (no `>>>`) | Yes | `evaluateResult` detects `echoDetected && replPromptCount == 0` → "Watch did not complete execution, idle" |
 | 2 | Watch sends partial response then disconnects | Partially | If disconnect happens mid-send → "Disconnected mid-send, idle". If after chunks written but before `>>>` → caught by scenario 1. If `>>>` arrived but response is incomplete → currently marked OK |
-| 3 | Watch responds with a Python traceback | Yes | `evaluateResult` uses case-insensitive check for "error" — Python tracebacks end with `...Error:` (e.g., `TypeError:`, `ValueError:`, `KeyError:`) so they are caught |
-| 4 | Watch responds with MemoryError | Reported | "error" substring in response → per-command reject message + ", idle". Reading is left for the next push to retry (watermark not advanced) |
-| 5 | No response at all within 20s | Yes | Response timer fires → disconnect → "No echo from watch, idle" |
+| 3 | Watch responds with a Python traceback | Yes | `evaluateResult` finds "Traceback", or "error" in the final `...Error:` line (e.g., `TypeError:`, `ValueError:`, `KeyError:`), in the watch's output after the echo |
+| 4 | Watch responds with MemoryError | Reported | "error" substring in the watch's output → per-command reject message + ", idle". Reading is left for the next push to retry (watermark not advanced) |
+| 5 | No response at all within 20s | Yes | Response timer fires → disconnect → "No response from watch, idle" |
 | 6 | Cannot connect at all | Yes | 15s send timeout → "Send timed out, idle". Or immediate `didFailToConnect` → "Connection failed, idle" |
 | 7 | REPL not ready (booting) | Yes | Prompt probe times out (5s) → "REPL not ready, idle". No payload sent |
 | 8 | Correct transmission, watch confirms | Yes | "OK, idle" (green) |
-| 9 | Watch responds with "ERROR" (any case) | Yes | `evaluateResult` catches case-insensitive "error" → per-command reject message + ", idle" (orange) |
+| 9 | Watch responds with "ERROR" (any case) | Yes | `evaluateResult` catches case-insensitive "error" after the echo → per-command reject message + ", idle" (orange) |
+| 10 | Command longer than 250 bytes | Yes | Refused before BLE → "Command is too long for the watch (N bytes), idle". Nothing is sent |
+| 11 | Watch replies, but the echo of the command is never found | Partially | Readings still need "reading received" in the reply, otherwise "Unexpected watch response, idle". Other commands end as OK if the reply contains no error text |
 
 ### Last transmission response
 
@@ -575,7 +608,7 @@ The scan shows **all** nearby BLE devices (no name or service filter), so the wa
 This means the BLE writes are completing but the watch firmware is not reacting. Most likely causes:
 
 1. **TX subscription was not sent** — if you are running a very old build of this integration (before the TX subscription fix), the watch will receive the data but ignore it. Update to the latest build.
-2. **GlyWatch app is not active** — the `"app": "gly"` field in the message must be handled by the active watch application. If the watch is running a different app, it will not respond.
+2. **The watch is not running GlyWatch firmware** — only GlyWatch handles messages whose `"app"` field is `"gly"`. Any other firmware ignores them.
 3. **Watch is connected to another device** — if the watch accepted our connection but is also trying to maintain a connection to another central, behaviour can be unpredictable.
 
 ### "Last push" stopped updating / error shown
@@ -584,7 +617,8 @@ This means the BLE writes are completing but the watch firmware is not reacting.
 - Check the error text in the Status row for the specific failure message
 - "REPL not ready" means the watch was booting or unresponsive — wait a few seconds and try again
 - "Send timed out" means the watch accepted the BLE connection but stopped responding mid-sequence
-- "No echo from watch" means data was sent but the watch never echoed it back
+- "No response from watch" means data was sent but the watch never replied
+- "Command is too long for the watch" means the command was not sent at all — shorten it (for a preset, shorten the name)
 - "Watch did not complete execution" means the watch started processing but crashed (no `>>>` returned)
 - If errors persist, tap **Forget device** and re-pair
 
