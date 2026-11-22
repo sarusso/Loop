@@ -647,7 +647,7 @@ struct GlyWatchSettingsView: View {
             Spacer()
             TextField("preset name", text: Binding(
                 get: { manager.presets[selectedPresetIndex].name },
-                set: { manager.presets[selectedPresetIndex].name = $0 }
+                set: { manager.presets[selectedPresetIndex].name = String($0.prefix(GlyWatchManager.maxPresetNameLength)) }
             ))
             .multilineTextAlignment(.trailing)
             .foregroundColor(.secondary)

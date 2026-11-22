@@ -974,6 +974,10 @@ final class GlyWatchManager: NSObject, ObservableObject {
     }
 
     static let maxPresets = 4
+    /// Keeps the `s_c` line well inside `maxCommandBytes` even when every
+    /// character needs escaping, and the "<name> mode" label short enough
+    /// for the watch face.
+    static let maxPresetNameLength = 16
 
     func addPreset() {
         guard presets.count < Self.maxPresets else { return }
@@ -987,7 +991,8 @@ final class GlyWatchManager: NSObject, ObservableObject {
     func duplicatePreset(at index: Int) {
         guard index < presets.count, presets.count < Self.maxPresets else { return }
         var copy = presets[index]
-        copy.name = "\(copy.name) copy"
+        let suffix = " copy"
+        copy.name = String(copy.name.prefix(Self.maxPresetNameLength - suffix.count)) + suffix
         presets.append(copy)
     }
 
@@ -1101,12 +1106,21 @@ final class GlyWatchManager: NSObject, ObservableObject {
             return
         }
 
-        // Pre-flight log capture so simulateNoDevice can still log an entry.
+        // Pre-flight log capture so failWithoutSending can still log an entry.
         currentLogCommand = message
         currentLogIsUserTriggered = isUserTriggered
 
         guard UserDefaults.standard.glyWatchPeripheralID != nil else {
-            simulateNoDevice()
+            failWithoutSending(error: "No device paired")
+            return
+        }
+
+        // Every command goes through here, so this is the one place that
+        // keeps an oversized line (e.g. `s_c` with a long preset name) from
+        // being truncated into a syntax error on the watch.
+        guard message.utf8.count <= Self.maxCommandBytes else {
+            log.error("Refusing to send GlyWatch command of %{public}d bytes (max %{public}d)", message.utf8.count, Self.maxCommandBytes)
+            failWithoutSending(error: "Command is too long for the watch (\(message.utf8.count) bytes)")
             return
         }
 
@@ -1132,14 +1146,20 @@ final class GlyWatchManager: NSObject, ObservableObject {
         connectOrScan()
     }
 
-    private func simulateNoDevice() {
+    /// Fail a command that never reaches BLE (no paired device, or a line
+    /// too long for the watch). The phase still goes connecting → idle,
+    /// because the settings screen reads the outcome on the return to idle.
+    /// The command's completion is not called.
+    private func failWithoutSending(error: String) {
         isSending = true
         pushPhase = .connecting
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
             guard let self else { return }
-            self.lastPushError = "No device paired"
-            self.appendCurrentCommandLogEntry(status: "No device paired", response: "")
+            self.lastPushError = error
+            self.appendCurrentCommandLogEntry(status: error, response: "")
             self.isSending = false
+            self.isDrainingReadings = false
+            self.alertResendTotal = 0
             self.hasTransmitted = true
             self.pushPhase = .idle
         }
