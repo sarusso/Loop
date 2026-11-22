@@ -722,7 +722,7 @@ final class GlyWatchManager: NSObject, ObservableObject {
         let preset = presets[index]
         let dsValue = preset.displayAlwaysOn ? "null" : "\(preset.displaySleepSec)"
         let fcValue = preset.forecaster == .none ? "null" : "\"\(preset.forecaster.rawValue)\""
-        let configMsg = "GB({\"app\":\"gly\",\"t\":\"s_c\",\"p\":\(index),\"n\":\"\(preset.name)\",\"rw\":\(preset.wakeOnReading ? 1 : 0),\"db\":\(preset.displayBrightness),\"ds\":\(dsValue),\"fc\":\(fcValue),\"od\":\(preset.od),\"nd\":\(preset.nd),\"st\":\(preset.st.rawValue),\"dt\":\(preset.dt.rawValue),\"lt\":\(preset.lt.rawValue),\"sp\":\(preset.sp.rawValue),\"lp\":\(preset.lp.rawValue)})\r\n"
+        let configMsg = "GB({\"app\":\"gly\",\"t\":\"s_c\",\"p\":\(index),\"n\":\(Self.quoted(preset.name)),\"rw\":\(preset.wakeOnReading ? 1 : 0),\"db\":\(preset.displayBrightness),\"ds\":\(dsValue),\"fc\":\(fcValue),\"od\":\(preset.od),\"nd\":\(preset.nd),\"st\":\(preset.st.rawValue),\"dt\":\(preset.dt.rawValue),\"lt\":\(preset.lt.rawValue),\"sp\":\(preset.sp.rawValue),\"lp\":\(preset.lp.rawValue)})\r\n"
 
         log.default("Sending GlyWatch preset %{public}d general config", index)
         beginTransmission(configMsg, isUserTriggered: true) { [weak self] in
@@ -731,6 +731,27 @@ final class GlyWatchManager: NSObject, ObservableObject {
             if self.lastPushError == nil { UserDefaults.standard.glyWatchPresets = self.presets }
             self.log.default("GlyWatch preset %{public}d general config saved", index)
         }
+    }
+
+    /// Render free text as a quoted string literal for a `GB(...)` line.
+    ///
+    /// The watch's REPL evaluates the line as Python, so a raw `"` would end
+    /// the string early and a raw `\` would start an escape. Both are
+    /// backslash-escaped, which reads the same as JSON and as Python.
+    /// Control characters are dropped: a newline would end the REPL line.
+    static func quoted(_ text: String) -> String {
+        var out = "\""
+        for scalar in text.unicodeScalars {
+            switch scalar {
+            case "\\": out += "\\\\"
+            case "\"": out += "\\\""
+            default:
+                if scalar.value >= 0x20 && scalar.value != 0x7F {
+                    out.unicodeScalars.append(scalar)
+                }
+            }
+        }
+        return out + "\""
     }
 
     /// Build the `s_a` line for one alert.
